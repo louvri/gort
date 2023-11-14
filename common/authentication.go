@@ -3,9 +3,10 @@ package common
 import (
 	"errors"
 	"fmt"
-	"github.com/golang-jwt/jwt"
 	"net/http"
 	"strings"
+
+	"github.com/golang-jwt/jwt"
 )
 
 func GetAuthorizationHeaderValue(r *http.Request) string {
@@ -61,4 +62,13 @@ func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
 		return claims
 	}
 	return nil
+}
+
+func GetPlatformTypeHeaderValue(r *http.Request) string {
+	header := r.Header["x-platform-type"]
+	if len(header) == 0 {
+		return ""
+	}
+
+	return header[0]
 }
