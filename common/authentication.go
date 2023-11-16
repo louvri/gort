@@ -65,7 +65,7 @@ func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
 }
 
 func GetPlatformTypeHeaderValue(r *http.Request) string {
-	header := r.Header["x-platform-type"]
+	header := r.Header["X-Platform-Type"]
 	if len(header) == 0 {
 		return ""
 	}
