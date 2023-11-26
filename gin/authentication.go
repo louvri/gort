@@ -1,6 +1,7 @@
 package gin
 
 import (
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
@@ -8,7 +9,7 @@ import (
 	"net/http"
 )
 
-func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric bool) gin.HandlerFunc {
+func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric, logErrorMessage bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bearerToken := common.GetBearerToken(c.Request)
 		if bearerToken == "" {
@@ -38,7 +39,8 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric 
 				errorMessage = "invalid token"
 			}
 		case *jwt.ValidationError: // something was wrong during the validation
-			vErr := err.(*jwt.ValidationError)
+			var vErr *jwt.ValidationError
+			errors.As(err, &vErr)
 
 			switch vErr.Errors {
 			case jwt.ValidationErrorExpired:
@@ -51,7 +53,9 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric 
 		}
 
 		if errorMessage != "" {
-			fmt.Printf("{\"module\":\"jwt-auth\", \"error\":\"%s\"}\n", err.Error())
+			if logErrorMessage {
+				fmt.Printf("{\"module\":\"jwt-auth\", \"error\":\"%s\"}\n", err.Error())
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{"message": unauthorizedErrorMessage})
 			c.Abort()
 			return

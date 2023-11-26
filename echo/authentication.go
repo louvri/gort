@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt"
 	"github.com/labstack/echo/v4"
@@ -8,7 +9,7 @@ import (
 	"net/http"
 )
 
-func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric bool) echo.MiddlewareFunc {
+func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric, logErrorMessage bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			bearerToken := common.GetBearerToken(c.Request())
@@ -37,7 +38,8 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric 
 					errorMessage = "invalid token"
 				}
 			case *jwt.ValidationError: // something was wrong during the validation
-				vErr := err.(*jwt.ValidationError)
+				var vErr *jwt.ValidationError
+				errors.As(err, &vErr)
 
 				switch vErr.Errors {
 				case jwt.ValidationErrorExpired:
@@ -50,6 +52,9 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric 
 			}
 
 			if errorMessage != "" {
+				if logErrorMessage {
+					fmt.Printf("{\"module\":\"jwt-auth\", \"error\":\"%s\"}\n", err.Error())
+				}
 				return echo.NewHTTPError(http.StatusUnauthorized, unauthorizedErrorMessage)
 			}
 
