@@ -42,7 +42,7 @@ func TestServerKeyAuthValidatorMiddleware(t *testing.T) {
 
 func TestJWTAuthValidatorMiddleware(t *testing.T) {
 	e := gin.Default()
-	e.Use(JWTAuthValidatorMiddleware("testing", "Invalid token/session", true))
+	e.Use(JWTAuthValidatorMiddleware("testing", "Invalid token/session", true, true))
 	e.GET("/", func(c *gin.Context) {
 		c.String(http.StatusOK, "Hello World")
 	})

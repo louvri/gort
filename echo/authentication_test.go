@@ -41,7 +41,7 @@ func TestServerKeyAuthValidatorMiddleware(t *testing.T) {
 
 func TestJWTAuthValidatorMiddleware(t *testing.T) {
 	e := echo.New()
-	e.Use(JWTAuthValidatorMiddleware("testing", "Invalid token/session", true))
+	e.Use(JWTAuthValidatorMiddleware("testing", "Invalid token/session", true, false))
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello World")
 	})
