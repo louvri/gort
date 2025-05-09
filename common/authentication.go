@@ -57,8 +57,10 @@ func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
 	token, _ := jwt.Parse(bearerToken, func(token *jwt.Token) (interface{}, error) {
 		return nil, nil
 	})
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && len(claims) > 0 {
-		return claims
+	if token != nil && token.Claims != nil {
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && len(claims) > 0 {
+			return claims
+		}
 	}
 	return nil
 }
