@@ -5,9 +5,15 @@ import (
 	"strings"
 )
 
-func ProbeMaintenanceMiddleware(errorMessage, skippedPath string, statusCode int, enabled bool) gin.HandlerFunc {
+func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, statusCode int, enabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if enabled && !strings.Contains(c.Request.URL.Path, skippedPath) {
+		if enabled {
+			for _, skippedPath := range skippedPaths {
+				if strings.Contains(c.Request.URL.Path, skippedPath) {
+					c.Next()
+					return
+				}
+			}
 			c.JSON(statusCode, gin.H{"message": errorMessage})
 			c.Abort()
 			return
