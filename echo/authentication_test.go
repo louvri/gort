@@ -1,71 +1,178 @@
 package echo
 
 import (
-	"github.com/labstack/echo/v4"
-	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt"
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestServerKeyAuthValidatorMiddleware(t *testing.T) {
+func signToken(claims jwt.MapClaims, key string) string {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, _ := token.SignedString([]byte(key))
+	return signed
+}
+
+func setupEchoJWT(key, errMsg string, symmetric, logError bool) *echo.Echo {
 	e := echo.New()
-	e.Use(ServerKeyAuthValidatorMiddleware("X-Server-Token", "jnX771xQ4tlLwG9GxlkheY6hd", "uctiiAkDQNe7eB7SEU1z5Ot4T", "Invalid token/session"))
+	e.Use(JWTAuthValidatorMiddleware(key, errMsg, symmetric, logError))
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Hello World")
 	})
-
-	emptyReq := httptest.NewRequest(echo.GET, "/", nil)
-	emptyRec := httptest.NewRecorder()
-	e.ServeHTTP(emptyRec, emptyReq)
-
-	assert.Equal(t, http.StatusUnauthorized, emptyRec.Code)
-	assert.Equal(t, "{\"message\":\"Invalid token/session\"}\n", emptyRec.Body.String())
-
-	expiringReq := httptest.NewRequest(echo.GET, "/", nil)
-	expiringReq.Header.Set("X-Server-Token", "uctiiAkDQNe7eB7SEU1z5Ot4T")
-	expiringRec := httptest.NewRecorder()
-	e.ServeHTTP(expiringRec, expiringReq)
-
-	assert.Equal(t, http.StatusOK, expiringRec.Code)
-	assert.Equal(t, "Hello World", expiringRec.Body.String())
-
-	validReq := httptest.NewRequest(echo.GET, "/", nil)
-	validReq.Header.Set("X-Server-Token", "jnX771xQ4tlLwG9GxlkheY6hd")
-	validRec := httptest.NewRecorder()
-	e.ServeHTTP(validRec, validReq)
-
-	assert.Equal(t, http.StatusOK, validRec.Code)
-	assert.Equal(t, "Hello World", validRec.Body.String())
+	return e
 }
 
 func TestJWTAuthValidatorMiddleware(t *testing.T) {
-	e := echo.New()
-	e.Use(JWTAuthValidatorMiddleware("testing", "Invalid token/session", true, false))
-	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "Hello World")
+	key := "testing"
+	errMsg := "Invalid token/session"
+
+	t.Run("missing token", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, false)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Contains(t, rec.Body.String(), errMsg)
 	})
 
-	emptyReq := httptest.NewRequest(echo.GET, "/", nil)
-	emptyRec := httptest.NewRecorder()
-	e.ServeHTTP(emptyRec, emptyReq)
+	t.Run("invalid signature", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, false)
+		token := signToken(jwt.MapClaims{"sub": "123"}, "wrong-key")
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusUnauthorized, emptyRec.Code)
-	assert.Equal(t, "{\"message\":\"Invalid token/session\"}\n", emptyRec.Body.String())
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Contains(t, rec.Body.String(), errMsg)
+	})
 
-	invalidReq := httptest.NewRequest(echo.GET, "/", nil)
-	invalidReq.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.J5S9dkJXUz8iUu6epfgTBFtNCHXFCm2VUFQWKDd8JHI")
-	invalidRec := httptest.NewRecorder()
-	e.ServeHTTP(invalidRec, invalidReq)
+	t.Run("expired token", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, false)
+		token := signToken(jwt.MapClaims{
+			"sub": "123",
+			"exp": float64(time.Now().Add(-1 * time.Hour).Unix()),
+		}, key)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusUnauthorized, invalidRec.Code)
-	assert.Equal(t, "{\"message\":\"Invalid token/session\"}\n", invalidRec.Body.String())
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
 
-	validReq := httptest.NewRequest(echo.GET, "/", nil)
-	validReq.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.UJFGOSLW3ar5q9qUk8IOFrOYUsdL8pd9je3yV2Kp-9g")
-	validRec := httptest.NewRecorder()
-	e.ServeHTTP(validRec, validReq)
+	t.Run("valid token", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, false)
+		token := signToken(jwt.MapClaims{
+			"sub":  "1234567890",
+			"name": "John Doe",
+			"iat":  float64(1516239022),
+		}, key)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusOK, validRec.Code)
-	assert.Equal(t, "Hello World", validRec.Body.String())
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "Hello World", rec.Body.String())
+	})
+
+	t.Run("malformed token", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, false)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer not-a-jwt")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("Basic scheme rejected", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, false)
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("log error message enabled", func(t *testing.T) {
+		e := setupEchoJWT(key, errMsg, true, true)
+		token := signToken(jwt.MapClaims{"sub": "123"}, "wrong-key")
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+}
+
+func TestServerKeyAuthValidatorMiddleware(t *testing.T) {
+	setupEcho := func() *echo.Echo {
+		e := echo.New()
+		e.Use(ServerKeyAuthValidatorMiddleware("X-Server-Token", "primary-key", "expiring-key", "Invalid token/session"))
+		e.GET("/", func(c echo.Context) error {
+			return c.String(http.StatusOK, "Hello World")
+		})
+		return e
+	}
+
+	t.Run("missing header", func(t *testing.T) {
+		e := setupEcho()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Invalid token/session")
+	})
+
+	t.Run("wrong key", func(t *testing.T) {
+		e := setupEcho()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Server-Token", "wrong-key")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("primary key", func(t *testing.T) {
+		e := setupEcho()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Server-Token", "primary-key")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "Hello World", rec.Body.String())
+	})
+
+	t.Run("expiring key", func(t *testing.T) {
+		e := setupEcho()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Server-Token", "expiring-key")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "Hello World", rec.Body.String())
+	})
+
+	t.Run("empty key value", func(t *testing.T) {
+		e := setupEcho()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Server-Token", "")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
 }

@@ -1,8 +1,9 @@
 package echo
 
 import (
-	"github.com/labstack/echo/v4"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
 
 func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, statusCode int, enabled bool) echo.MiddlewareFunc {
@@ -10,7 +11,7 @@ func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, stat
 		return func(c echo.Context) error {
 			if enabled {
 				for _, skippedPath := range skippedPaths {
-					if strings.Contains(c.Request().URL.Path, skippedPath) {
+					if strings.HasPrefix(c.Request().URL.Path, skippedPath) {
 						return next(c)
 					}
 				}
