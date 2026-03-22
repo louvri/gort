@@ -1,66 +1,72 @@
 package common
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/golang-jwt/jwt"
 	"net/http"
 	"strings"
+
+	"github.com/golang-jwt/jwt"
 )
 
 func GetAuthorizationHeaderValue(r *http.Request) string {
-	header := r.Header["Authorization"]
-	if len(header) == 0 {
-		return ""
-	}
-
-	return header[0]
+	return r.Header.Get("Authorization")
 }
 
 func GetBearerToken(r *http.Request) string {
-	authorization := GetAuthorizationHeaderValue(r)
-	tokens := strings.Split(authorization, " ")
-	if len(tokens) > 1 {
-		return tokens[1]
+	token, found := strings.CutPrefix(GetAuthorizationHeaderValue(r), "Bearer ")
+	if !found {
+		return ""
 	}
-
-	return ""
+	return token
 }
 
-func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (result jwt.MapClaims, err error) {
-	token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (interface{}, error) {
-		if symmetric {
-			return []byte(key), nil
-		} else {
-			verifyKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(key))
-			if err != nil {
-				fmt.Printf("{\"module\":\"jwt-auth\", \"error\":\"%s\"}\n", err.Error())
-				return nil, err
-			}
+func logAuthError(msg string) {
+	escaped, _ := json.Marshal(msg)
+	fmt.Printf("{\"module\":\"jwt-auth\", \"error\":%s}\n", escaped)
+}
 
-			return verifyKey, nil
+func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
+	return func(token *jwt.Token) (interface{}, error) {
+		if symmetric {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte(key), nil
 		}
-	})
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		verifyKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(key))
+		if err != nil {
+			logAuthError(err.Error())
+			return nil, err
+		}
+		return verifyKey, nil
+	}
+}
+
+func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(bearerToken, JWTKeyFunc(key, symmetric))
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 	if !token.Valid {
-		return result, errors.New("invalid token")
+		return nil, errors.New("invalid token")
 	}
 	if claims, ok := token.Claims.(jwt.MapClaims); ok {
 		return claims, nil
 	}
-	return result, errors.New("claim type is not map")
+	return nil, errors.New("claim type is not map")
 }
 
 func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
-	token, _ := jwt.Parse(bearerToken, func(token *jwt.Token) (interface{}, error) {
-		return nil, nil
-	})
-	if token != nil && token.Claims != nil {
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && len(claims) > 0 {
-			return claims
-		}
+	parser := &jwt.Parser{}
+	claims := jwt.MapClaims{}
+	_, _, err := parser.ParseUnverified(bearerToken, claims)
+	if err != nil || len(claims) == 0 {
+		return nil
 	}
-	return nil
+	return claims
 }
