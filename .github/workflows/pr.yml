@@ -24,13 +24,17 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      - name: Build
+        working-directory: ${{ matrix.module }}
+        run: go build ./...
+
       - name: Vet
         working-directory: ${{ matrix.module }}
         run: go vet ./...
 
       - name: Test
         working-directory: ${{ matrix.module }}
-        run: go test -race ./...
+        run: go test -race -count=1 ./...
 
   lint:
     name: Lint
@@ -47,6 +51,6 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.1
+          version: v2.11.3
           install-mode: goinstall
           working-directory: ${{ matrix.module }}
