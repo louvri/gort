@@ -9,38 +9,58 @@ permissions:
 
 jobs:
   release:
-    name: Tag & Release
+    name: Release (${{ matrix.module }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [common, echo, gin]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get latest tag
+      - name: Get latest module tag
         id: latest_tag
         run: |
-          latest=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
-          echo "tag=${latest:-v0.0.0}" >> "$GITHUB_OUTPUT"
+          latest=$(git tag -l '${{ matrix.module }}/v*' --sort=-v:refname | head -n 1)
+          echo "tag=${latest}" >> "$GITHUB_OUTPUT"
+          echo "version=${latest#${{ matrix.module }}/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          tag="${{ steps.latest_tag.outputs.tag }}"
+          if [ -z "$tag" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "${tag}..HEAD" -- ${{ matrix.module }}/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Bump version
+        if: steps.changes.outputs.changed == 'true'
         id: bump
         run: |
-          current="${{ steps.latest_tag.outputs.tag }}"
-          current="${current#v}"
-          IFS='.' read -r major minor patch <<< "$current"
-          patch=$((patch + 1))
-          new_tag="v${major}.${minor}.${patch}"
+          current="${{ steps.latest_tag.outputs.version }}"
+          if [ -z "$current" ]; then
+            new_tag="${{ matrix.module }}/v0.1.0"
+          else
+            IFS='.' read -r major minor patch <<< "$current"
+            patch=$((patch + 1))
+            new_tag="${{ matrix.module }}/v${major}.${minor}.${patch}"
+          fi
           echo "new_tag=${new_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
+        if: steps.changes.outputs.changed == 'true'
         id: notes
         run: |
           prev_tag="${{ steps.latest_tag.outputs.tag }}"
-          new_tag="${{ steps.bump.outputs.new_tag }}"
-          if git rev-parse "$prev_tag" >/dev/null 2>&1; then
-            log=$(git log "${prev_tag}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
+          if [ -n "$prev_tag" ] && git rev-parse "$prev_tag" >/dev/null 2>&1; then
+            log=$(git log "${prev_tag}..HEAD" --pretty=format:"- %s (%h)" --no-merges -- ${{ matrix.module }}/)
           else
-            log=$(git log --pretty=format:"- %s (%h)" --no-merges)
+            log=$(git log --pretty=format:"- %s (%h)" --no-merges -- ${{ matrix.module }}/)
           fi
           {
             echo "notes<<EOF"
@@ -48,15 +68,14 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create tag
+      - name: Create tag and release
+        if: steps.changes.outputs.changed == 'true'
         run: |
           git tag "${{ steps.bump.outputs.new_tag }}"
-          git tag "common/${{ steps.bump.outputs.new_tag }}"
-          git tag "echo/${{ steps.bump.outputs.new_tag }}"
-          git tag "gin/${{ steps.bump.outputs.new_tag }}"
-          git push origin --tags
+          git push origin "${{ steps.bump.outputs.new_tag }}"
 
       - name: Create GitHub release
+        if: steps.changes.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.bump.outputs.new_tag }}
