@@ -2,6 +2,7 @@ package echo
 
 import (
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 
 	"github.com/golang-jwt/jwt"
@@ -17,28 +18,13 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric,
 			}
 
 			token, err := jwt.Parse(bearerToken, jwtKeyFunc(key, symmetric))
-
-			var errorMessage string
-			switch vErr := err.(type) {
-			case nil:
-				if !token.Valid {
-					errorMessage = "invalid token"
-				}
-			case *jwt.ValidationError:
-				switch vErr.Errors {
-				case jwt.ValidationErrorExpired:
-					errorMessage = "token expired"
-				default:
-					errorMessage = "token ValidationError error: " + vErr.Error()
-				}
-			default:
-				errorMessage = "token parse error: " + err.Error()
-			}
-
-			if errorMessage != "" {
+			if err != nil {
 				if logErrorMessage {
-					logAuthError(err.Error())
+					slog.Error("authentication failed", "module", "jwt-auth", "error", err)
 				}
+				return echo.NewHTTPError(http.StatusUnauthorized, unauthorizedErrorMessage)
+			}
+			if !token.Valid {
 				return echo.NewHTTPError(http.StatusUnauthorized, unauthorizedErrorMessage)
 			}
 

@@ -75,14 +75,14 @@ func TestGetBearerToken(t *testing.T) {
 func TestJWTKeyFunc(t *testing.T) {
 	t.Run("symmetric returns key bytes", func(t *testing.T) {
 		keyFunc := JWTKeyFunc("mysecret", true)
-		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodHS256, Header: map[string]interface{}{"alg": "HS256"}})
+		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodHS256, Header: map[string]any{"alg": "HS256"}})
 		assert.Nil(t, err)
 		assert.Equal(t, []byte("mysecret"), result)
 	})
 
 	t.Run("symmetric rejects RSA algorithm", func(t *testing.T) {
 		keyFunc := JWTKeyFunc("mysecret", true)
-		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodRS256, Header: map[string]interface{}{"alg": "RS256"}})
+		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodRS256, Header: map[string]any{"alg": "RS256"}})
 		assert.NotNil(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "unexpected signing method")
@@ -90,7 +90,7 @@ func TestJWTKeyFunc(t *testing.T) {
 
 	t.Run("asymmetric rejects HMAC algorithm", func(t *testing.T) {
 		keyFunc := JWTKeyFunc("not-a-valid-pem", false)
-		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodHS256, Header: map[string]interface{}{"alg": "HS256"}})
+		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodHS256, Header: map[string]any{"alg": "HS256"}})
 		assert.NotNil(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "unexpected signing method")
@@ -98,7 +98,7 @@ func TestJWTKeyFunc(t *testing.T) {
 
 	t.Run("asymmetric with invalid PEM", func(t *testing.T) {
 		keyFunc := JWTKeyFunc("not-a-valid-pem", false)
-		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodRS256, Header: map[string]interface{}{"alg": "RS256"}})
+		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodRS256, Header: map[string]any{"alg": "RS256"}})
 		assert.NotNil(t, err)
 		assert.Nil(t, result)
 	})

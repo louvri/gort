@@ -1,9 +1,9 @@
 package common
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -22,13 +22,8 @@ func GetBearerToken(r *http.Request) string {
 	return token
 }
 
-func logAuthError(msg string) {
-	escaped, _ := json.Marshal(msg)
-	fmt.Printf("{\"module\":\"jwt-auth\", \"error\":%s}\n", escaped)
-}
-
 func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
-	return func(token *jwt.Token) (interface{}, error) {
+	return func(token *jwt.Token) (any, error) {
 		if symmetric {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -40,7 +35,7 @@ func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 		}
 		verifyKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(key))
 		if err != nil {
-			logAuthError(err.Error())
+			slog.Error("failed to parse RSA public key", "module", "jwt-auth", "error", err)
 			return nil, err
 		}
 		return verifyKey, nil
