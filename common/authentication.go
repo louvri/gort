@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func GetAuthorizationHeaderValue(r *http.Request) string {
@@ -57,7 +57,7 @@ func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims
 }
 
 func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
-	parser := &jwt.Parser{}
+	parser := jwt.NewParser()
 	claims := jwt.MapClaims{}
 	_, _, err := parser.ParseUnverified(bearerToken, claims)
 	if err != nil || len(claims) == 0 {
