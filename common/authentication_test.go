@@ -1,6 +1,10 @@
 package common
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +18,25 @@ func signToken(claims jwt.MapClaims, key string) string {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, _ := token.SignedString([]byte(key))
 	return signed
+}
+
+func generateRSAKeyPair(t *testing.T) (privPEM, pubPEM string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	assert.Nil(t, err)
+
+	privPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}))
+
+	pubBytes, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	assert.Nil(t, err)
+	pubPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubBytes,
+	}))
+	return privPEM, pubPEM
 }
 
 func TestGetAuthorizationHeaderValue(t *testing.T) {
@@ -101,6 +124,114 @@ func TestJWTKeyFunc(t *testing.T) {
 		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodRS256, Header: map[string]any{"alg": "RS256"}})
 		assert.NotNil(t, err)
 		assert.Nil(t, result)
+	})
+}
+
+func TestGenerateAuthToken(t *testing.T) {
+	key := "mysecret"
+
+	t.Run("round-trips through GetMapClaimsFromJWT", func(t *testing.T) {
+		token, err := GenerateAuthToken("user-1", key, 60, "admin")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, token)
+
+		claims, err := GetMapClaimsFromJWT(key, token, true)
+		assert.Nil(t, err)
+		assert.Equal(t, "user-1", claims["sub"])
+		assert.Equal(t, []any{"admin"}, claims["data"])
+		assert.Contains(t, claims, "iat")
+		assert.Contains(t, claims, "exp")
+	})
+
+	t.Run("sets exp after iat based on lifetime", func(t *testing.T) {
+		token, err := GenerateAuthToken("user-1", key, 30, nil)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT(key, token, true)
+		assert.Nil(t, err)
+		iat := int64(claims["iat"].(float64))
+		exp := int64(claims["exp"].(float64))
+		assert.Equal(t, int64(30*60), exp-iat)
+	})
+
+	t.Run("no data yields nil claim", func(t *testing.T) {
+		token, err := GenerateAuthToken("user-1", key, 60)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT(key, token, true)
+		assert.Nil(t, err)
+		assert.Nil(t, claims["data"])
+	})
+
+	t.Run("token verified with wrong key fails", func(t *testing.T) {
+		token, err := GenerateAuthToken("user-1", key, 60)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT("other-key", token, true)
+		assert.NotNil(t, err)
+		assert.Nil(t, claims)
+	})
+
+	t.Run("expired token rejected on verification", func(t *testing.T) {
+		token, err := GenerateAuthToken("user-1", key, -1)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT(key, token, true)
+		assert.NotNil(t, err)
+		assert.Nil(t, claims)
+	})
+}
+
+func TestGenerateAuthTokenAsym(t *testing.T) {
+	privPEM, pubPEM := generateRSAKeyPair(t)
+
+	t.Run("round-trips through GetMapClaimsFromJWT", func(t *testing.T) {
+		token, err := GenerateAuthTokenAsym("user-1", privPEM, 60, "admin")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, token)
+
+		claims, err := GetMapClaimsFromJWT(pubPEM, token, false)
+		assert.Nil(t, err)
+		assert.Equal(t, "user-1", claims["sub"])
+		assert.Equal(t, []any{"admin"}, claims["data"])
+		assert.Contains(t, claims, "iat")
+		assert.Contains(t, claims, "exp")
+	})
+
+	t.Run("sets exp after iat based on lifetime", func(t *testing.T) {
+		token, err := GenerateAuthTokenAsym("user-1", privPEM, 30, nil)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT(pubPEM, token, false)
+		assert.Nil(t, err)
+		iat := int64(claims["iat"].(float64))
+		exp := int64(claims["exp"].(float64))
+		assert.Equal(t, int64(30*60), exp-iat)
+	})
+
+	t.Run("invalid private key PEM returns error", func(t *testing.T) {
+		token, err := GenerateAuthTokenAsym("user-1", "not-a-valid-pem", 60)
+		assert.NotNil(t, err)
+		assert.Empty(t, token)
+	})
+
+	t.Run("token verified with wrong public key fails", func(t *testing.T) {
+		token, err := GenerateAuthTokenAsym("user-1", privPEM, 60)
+		assert.Nil(t, err)
+
+		_, otherPub := generateRSAKeyPair(t)
+		claims, err := GetMapClaimsFromJWT(otherPub, token, false)
+		assert.NotNil(t, err)
+		assert.Nil(t, claims)
+	})
+
+	t.Run("expired token rejected on verification", func(t *testing.T) {
+		token, err := GenerateAuthTokenAsym("user-1", privPEM, -1)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT(pubPEM, token, false)
+		assert.NotNil(t, err)
+		assert.Nil(t, claims)
 	})
 }
 
