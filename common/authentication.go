@@ -11,11 +11,18 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// GenerateAuthToken mints an HS256-signed JWT for sub, verifiable via
+// JWTKeyFunc(jwtKey, true). The variadic data is stored under the "data" claim:
+// zero args yield a nil claim (JSON null), and one or more args yield a []any,
+// so a single value still arrives as a one-element slice (consumers must
+// type-assert to []any and index). jwtLifetimeInMinute sets exp relative to
+// iat; values <= 0 mint an already-expired token (intended for tests, not
+// production callers).
 func GenerateAuthToken(sub, jwtKey string, jwtLifetimeInMinute int, data ...any) (string, error) {
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  sub,
-		"exp":  now.Add(time.Minute * time.Duration(jwtLifetimeInMinute)).Unix(),
+		"exp":  now.Add(time.Duration(jwtLifetimeInMinute) * time.Minute).Unix(),
 		"iat":  now.Unix(),
 		"data": data,
 	})
@@ -29,16 +36,20 @@ func GenerateAuthToken(sub, jwtKey string, jwtLifetimeInMinute int, data ...any)
 	return tokenString, nil
 }
 
+// GenerateAuthTokenAsym mints an RS256-signed JWT for sub using the PEM-encoded
+// RSA private key, verifiable via JWTKeyFunc(publicKeyPEM, false). The "data"
+// claim and jwtLifetimeInMinute behave as documented on GenerateAuthToken.
 func GenerateAuthTokenAsym(sub, jwtPrivKey string, jwtLifetimeInMinute int, data ...any) (string, error) {
 	signKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(jwtPrivKey))
 	if err != nil {
+		slog.Error("failed to parse RSA private key", "module", "jwt-auth", "error", err)
 		return "", err
 	}
 
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
 		"sub":  sub,
-		"exp":  now.Add(time.Minute * time.Duration(jwtLifetimeInMinute)).Unix(),
+		"exp":  now.Add(time.Duration(jwtLifetimeInMinute) * time.Minute).Unix(),
 		"iat":  now.Unix(),
 		"data": data,
 	})

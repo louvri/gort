@@ -154,6 +154,15 @@ func TestGenerateAuthToken(t *testing.T) {
 		assert.Equal(t, int64(30*60), exp-iat)
 	})
 
+	t.Run("no data yields nil claim", func(t *testing.T) {
+		token, err := GenerateAuthToken("user-1", key, 60)
+		assert.Nil(t, err)
+
+		claims, err := GetMapClaimsFromJWT(key, token, true)
+		assert.Nil(t, err)
+		assert.Nil(t, claims["data"])
+	})
+
 	t.Run("token verified with wrong key fails", func(t *testing.T) {
 		token, err := GenerateAuthToken("user-1", key, 60)
 		assert.Nil(t, err)
