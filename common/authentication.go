@@ -6,9 +6,51 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+func GenerateAuthToken(sub, jwtKey string, jwtLifetimeInMinute int, data ...any) (string, error) {
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":  sub,
+		"exp":  now.Add(time.Minute * time.Duration(jwtLifetimeInMinute)).Unix(),
+		"iat":  now.Unix(),
+		"data": data,
+	})
+
+	tokenString, err := token.SignedString([]byte(jwtKey))
+	if err != nil {
+		slog.Error("failed to sign token", "module", "jwt-auth", "error", err)
+		return "", err
+	}
+
+	return tokenString, nil
+}
+
+func GenerateAuthTokenAsym(sub, jwtPrivKey string, jwtLifetimeInMinute int, data ...any) (string, error) {
+	signKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(jwtPrivKey))
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub":  sub,
+		"exp":  now.Add(time.Minute * time.Duration(jwtLifetimeInMinute)).Unix(),
+		"iat":  now.Unix(),
+		"data": data,
+	})
+
+	tokenString, err := token.SignedString(signKey)
+	if err != nil {
+		slog.Error("failed to sign token", "module", "jwt-auth", "error", err)
+		return "", err
+	}
+
+	return tokenString, nil
+}
 
 func GetAuthorizationHeaderValue(r *http.Request) string {
 	return r.Header.Get("Authorization")
