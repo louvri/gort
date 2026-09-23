@@ -3,10 +3,11 @@
 #        next-version.sh --base MODULE
 #
 # Prints the tag for MODULE's next release (MODULE/vX.Y.Z), or "skip" when
-# there is nothing to release. With --base, prints the release tag that the
-# next version is computed from instead (empty before the first release), so
-# release notes start where the version bump does. Diagnostics go to stderr
-# so stdout stays machine-readable.
+# there is nothing to release. With --base, prints the newest release tag
+# reachable from HEAD instead (empty before the first release): the start of
+# the range the version is computed from, and so of the release notes. The
+# number itself may go past a newer tag off the mainline; see below.
+# Diagnostics go to stderr so stdout stays machine-readable.
 #
 # Each module is versioned on its own: its tags are MODULE/v*, and only
 # commits that touch MODULE/ count towards its release, so a trailer on a
@@ -48,26 +49,89 @@ if [[ ! "$module" =~ ^[a-z0-9_-]+$ ]]; then
 fi
 path="${module}/"
 
-# Read the tag list into a variable rather than piping to head: with
-# `pipefail`, git being SIGPIPE'd once the list outgrows the pipe
-# buffer would fail the step.
-tags=$(git tag --sort=-v:refname --list "${module}/v[0-9]*.[0-9]*.[0-9]*")
+# stable TAG - succeed when TAG is exactly MODULE/vMAJOR.MINOR.PATCH, setting
+# BASH_REMATCH to its numbers; the tag glob still admits MODULE/v1.2.3-rc1.
+stable() {
+  [[ "$1" =~ ^${module}/v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+}
 
-# Take the newest tag that is exactly MODULE/vMAJOR.MINOR.PATCH; the glob
-# above still admits things like MODULE/v1.2.3-rc1.
+# The major version this module's path is for: N for a path ending in /vN,
+# otherwise 0 or 1, which share a path.
+head_major=1
+if [ -f "${path}go.mod" ]; then
+  module_path=$(sed -nE 's/^module[[:space:]]+([^[:space:]]+).*/\1/p' "${path}go.mod")
+  if [[ "$module_path" =~ /v([0-9]+)$ ]]; then
+    head_major="${BASH_REMATCH[1]}"
+  fi
+fi
+
+# Tag lists are read into variables rather than piped to head: with
+# `pipefail`, git being SIGPIPE'd once a list outgrows the pipe buffer would
+# fail the step.
+#
+# The base - where the range, the unchanged-tree check and the release notes
+# start - is the newest tag reachable from HEAD. A tag that is not reachable
+# is one of two things:
+# - a tag of v2 or later for another major: a version of the /vN module path,
+#   not of this one, so it does not count at all
+# - on a mainline commit after HEAD: a later run already released past this
+#   one, and this run - a re-run of an old, failed release, say - is stale;
+#   publishing would put a higher version on older code, so it releases
+#   nothing. The mainline is MAINLINE_REF (the release workflow passes
+#   origin/main); without it, no run is taken for stale
+# - anywhere else: a tag pushed by hand off the mainline. It is no base, but
+#   it still owns its version on the module proxy, so the number goes past
+#   it - reusing its name would collide, and a lower version would never be
+#   @latest
+# ancestor A B - succeed when A is an ancestor of B; a git error fails the step.
+ancestor() {
+  local status=0
+  git merge-base --is-ancestor "$1" "$2" || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "git merge-base ${1} ${2} failed" >&2
+    exit 1
+  fi
+  [ "$status" -eq 0 ]
+}
+
+glob="${module}/v[0-9]*.[0-9]*.[0-9]*"
+reachable=$(git tag --sort=-v:refname --merged HEAD --list "$glob")
+every=$(git tag --sort=-v:refname --list "$glob")
 tag=""
+while IFS= read -r candidate; do
+  if stable "$candidate"; then
+    tag="$candidate"
+    break
+  fi
+done <<< "$reachable"
+top="$tag"
+while IFS= read -r candidate; do
+  if ! stable "$candidate" || grep -qxF "$candidate" <<< "$reachable"; then
+    continue
+  fi
+  candidate_major="${BASH_REMATCH[1]}"
+  if [ "$candidate_major" -ge 2 ] && [ "$candidate_major" -ne "$head_major" ]; then
+    echo "Ignoring ${candidate}: a v${candidate_major} tag belongs to the /v${candidate_major} module path." >&2
+    continue
+  fi
+  if [ "$mode" = next ] && [ -n "${MAINLINE_REF:-}" ] \
+    && ancestor HEAD "$candidate" && ancestor "$candidate" "$MAINLINE_REF"; then
+    echo "${candidate} is on a later mainline commit than HEAD; this run is stale, nothing to release." >&2
+    echo "skip"
+    exit 0
+  fi
+  if [ -z "$top" ] || [ "$(printf '%s\n%s\n' "$top" "$candidate" | sort -V | tail -n 1)" = "$candidate" ]; then
+    top="$candidate"
+  fi
+done <<< "$every"
 major=0
 minor=0
 patch=0
-while IFS= read -r candidate; do
-  if [[ "$candidate" =~ ^${module}/v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-    tag="$candidate"
-    major="${BASH_REMATCH[1]}"
-    minor="${BASH_REMATCH[2]}"
-    patch="${BASH_REMATCH[3]}"
-    break
-  fi
-done <<< "$tags"
+if stable "$top"; then
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  patch="${BASH_REMATCH[3]}"
+fi
 
 if [ "$mode" = base ]; then
   echo "$tag"
@@ -83,9 +147,22 @@ else
   first_release=true
 fi
 
+# changed FROM TO - succeed when the module differs between FROM and TO.
+# A git error fails the step rather than counting as a change: the version is
+# about to be published, and a tag cannot be withdrawn.
+changed() {
+  local status=0
+  git diff --quiet "$1" "$2" -- "$path" || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "git diff ${1} ${2} failed" >&2
+    exit 1
+  fi
+  [ "$status" -eq 1 ]
+}
+
 # A change reverted before its release leaves the module as it was tagged;
 # publishing it would repeat the last version under a new number.
-if [ "$first_release" = false ] && git diff --quiet "$tag" HEAD -- "$path"; then
+if [ "$first_release" = false ] && ! changed "$tag" HEAD; then
   echo "${path} is unchanged since ${tag}; nothing to release." >&2
   echo "skip"
   exit 0
@@ -165,8 +242,8 @@ rank_change() {
   fi
   if [ -z "$explicit" ]; then
     if [ -n "$levels" ]; then
-      # Present but unreadable: say so rather than fall through to the
-      # markers, which would silently produce a different version.
+      # Present but unreadable: fall back to the markers, but say so - doing
+      # it silently would hide why the version is not the one asked for.
       echo "Release-As: trailer on '${subjects%%$'\n'*}' is not major, minor, patch or skip; ignoring it." >&2
     fi
     ranked="$markers"
@@ -234,13 +311,7 @@ merge_changed_module() {
     echo "git merge-tree failed on ${1}" >&2
     exit 1
   fi
-  status=0
-  git diff --quiet "${auto%%$'\n'*}" "$1" -- "$path" || status=$?
-  if [ "$status" -gt 1 ]; then
-    echo "git diff failed on ${1}" >&2
-    exit 1
-  fi
-  [ "$status" -eq 1 ]
+  changed "${auto%%$'\n'*}" "$1"
 }
 
 # Lists are read into variables before looping over them: a failure inside
@@ -280,7 +351,7 @@ note() {
 }
 
 while IFS= read -r merge; do
-  if [ -z "$merge" ] || git diff --quiet "${merge}^1" "$merge" -- "$path"; then
+  if [ -z "$merge" ] || ! changed "${merge}^1" "$merge"; then
     continue
   fi
   rank_merge "$merge"
@@ -323,15 +394,16 @@ fi
 # From v2 on, Go requires the major version in the module path. A tag the
 # path does not match is not served as that version, and a published tag
 # cannot be withdrawn, so refuse rather than publish it.
-if [ "$major" -ge 2 ]; then
-  module_path=$(sed -nE 's/^module[[:space:]]+([^[:space:]]+).*/\1/p' "${path}go.mod" 2>/dev/null || true)
-  if [[ "$module_path" != */v"$major" ]]; then
-    echo "${module}/v${major} needs ${path}go.mod to declare a module path ending in /v${major} (found: '${module_path}')." >&2
-    echo "If v${major} was not intended, push the right tag by hand (git tag ${module}/vX.Y.Z && git push origin ${module}/vX.Y.Z); later runs start from it." >&2
-    exit 1
-  fi
+if [ "$major" -ge 2 ] && [ "$major" -ne "$head_major" ]; then
+  echo "${module}/v${major} needs ${path}go.mod to declare a module path ending in /v${major}." >&2
+  echo "If v${major} was not intended, tag the current main commit by hand with the version you want (git tag ${module}/vX.Y.Z origin/main && git push origin ${module}/vX.Y.Z); later runs start from it. A tag on a commit that is not on main is ignored as a base." >&2
+  exit 1
 fi
 
 next="${module}/v${major}.${minor}.${patch}"
-echo "Bumping ${tag} -> ${next} (${level})" >&2
+if [ -n "$top" ] && [ "$top" != "$tag" ]; then
+  echo "Bumping ${top} (newest ${module} tag; changes counted from ${tag}) -> ${next} (${level})" >&2
+else
+  echo "Bumping ${tag} -> ${next} (${level})" >&2
+fi
 echo "$next"
