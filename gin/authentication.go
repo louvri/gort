@@ -13,8 +13,9 @@ import (
 // JWTAuthValidatorMiddleware rejects requests without a valid "Bearer" JWT
 // with 401 and unauthorizedErrorMessage. The signing algorithm is pinned to
 // the key type: symmetric expects HMAC with key as the shared secret;
-// otherwise it expects RSA with key as a PEM-encoded public key.
-// logErrorMessage logs parse and verification failures.
+// otherwise it expects RSA with key as a PEM-encoded public key. An empty
+// HMAC key rejects every token. logErrorMessage logs token verification
+// failures; an unparseable RSA key is logged regardless.
 func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric, logErrorMessage bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bearerToken := getBearerToken(c.Request)

@@ -84,12 +84,16 @@ func GetBearerToken(r *http.Request) string {
 // JWTKeyFunc returns a jwt.Keyfunc that pins the signing algorithm family to
 // the key type, preventing algorithm-confusion attacks: symmetric expects
 // HMAC and uses key as the shared secret; otherwise it expects RSA and parses
-// key as a PEM-encoded public key.
+// key as a PEM-encoded public key. An empty HMAC key is rejected, since HMAC
+// would otherwise verify tokens anyone can sign with that same empty key.
 func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 	return func(token *jwt.Token) (any, error) {
 		if symmetric {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			if key == "" {
+				return nil, errors.New("empty HMAC key")
 			}
 			return []byte(key), nil
 		}

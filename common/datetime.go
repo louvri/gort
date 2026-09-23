@@ -30,7 +30,8 @@ func ExtractTimeZoneTextFromHeader(r *http.Request) string {
 
 // ExtractTimeZoneLocationFromHeader returns a fixed zone named after the
 // Timezone header with the offset from ExtractTimeZoneInSecondsFromHeader, or
-// time.UTC when the header is absent.
+// time.UTC when the header is absent. An unparseable header yields a zone with
+// that name and a zero offset.
 func ExtractTimeZoneLocationFromHeader(r *http.Request) *time.Location {
 	name := ExtractTimeZoneTextFromHeader(r)
 	offset := ExtractTimeZoneInSecondsFromHeader(r)
@@ -41,9 +42,11 @@ func ExtractTimeZoneLocationFromHeader(r *http.Request) *time.Location {
 }
 
 // ExtractTimeZoneInSecondsFromHeader parses the Timezone header as a UTC
-// offset in seconds. A "GMT" or "UTC" prefix is ignored, and the remainder is
-// read as hours ("+7", "-05") or as HHMM ("+0530"). It returns 0 when the
-// header is missing or unparseable.
+// offset in seconds. Every "GMT" and "UTC" (case-insensitive) is removed, and
+// the remainder is read as hours when shorter than four characters ("+7",
+// "-05") and as HHMM otherwise ("+0530"). It returns 0 when the header is
+// missing, the remainder is shorter than two characters, or it is not an
+// integer.
 func ExtractTimeZoneInSecondsFromHeader(r *http.Request) int {
 	timezone := strings.ToUpper(ExtractTimeZoneTextFromHeader(r))
 	timezone = strings.ReplaceAll(strings.ReplaceAll(timezone, "GMT", ""), "UTC", "")

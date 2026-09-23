@@ -103,6 +103,13 @@ func TestJWTKeyFunc(t *testing.T) {
 		assert.Equal(t, []byte("mysecret"), result)
 	})
 
+	t.Run("symmetric rejects empty key", func(t *testing.T) {
+		keyFunc := JWTKeyFunc("", true)
+		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodHS256, Header: map[string]any{"alg": "HS256"}})
+		assert.NotNil(t, err)
+		assert.Nil(t, result)
+	})
+
 	t.Run("symmetric rejects RSA algorithm", func(t *testing.T) {
 		keyFunc := JWTKeyFunc("mysecret", true)
 		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodRS256, Header: map[string]any{"alg": "RS256"}})

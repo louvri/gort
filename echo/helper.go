@@ -2,6 +2,7 @@ package echo
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,6 +24,9 @@ func jwtKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 		if symmetric {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			if key == "" {
+				return nil, errors.New("empty HMAC key")
 			}
 			return []byte(key), nil
 		}

@@ -18,7 +18,7 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric,
 
 Validates JWT bearer tokens on incoming requests. Returns `401 Unauthorized` if the token is missing, expired, or invalid.
 
-- `key` — signing key (shared secret for HMAC, PEM public key for RSA)
+- `key` — signing key (shared secret for HMAC, PEM public key for RSA); an empty HMAC key rejects every token
 - `unauthorizedErrorMessage` — message returned to the client on auth failure
 - `symmetric` — `true` for HMAC, `false` for RSA
 - `logErrorMessage` — `true` to log detailed errors to stdout
