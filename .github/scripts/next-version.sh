@@ -7,7 +7,11 @@
 #
 # Each module is versioned on its own: its tags are MODULE/v*, and only
 # commits that touch MODULE/ count towards its release, so a trailer on a
-# commit that only changes another module does not move this one.
+# commit that only changes another module does not move this one. A squash
+# merge is a single commit, though, so a pull request's markers apply to
+# every module it touches. A module is released only by a push that changes
+# it; changes a push carries without touching the module wait for its next
+# change rather than publishing a version nothing asked for.
 #
 # The release level comes from every such commit since the module's last
 # release tag, so it does not depend on whether a pull request was squashed,
@@ -55,16 +59,27 @@ done <<< "$tags"
 # Read every commit since that tag rather than only the tip, so the
 # bump does not depend on whether the pull request was squashed,
 # merged or rebased.
+first_release=false
 if [ -n "$tag" ]; then
   range="${tag}..HEAD"
 else
   tag="${module}/v0.0.0"
   range="HEAD"
+  first_release=true
 fi
 if [ -z "$(git rev-list -n 1 "$range" -- "$path")" ]; then
   echo "No changes to ${path} since ${tag}; nothing to release." >&2
   echo "skip"
   exit 0
+fi
+has_parent=false
+if git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
+  has_parent=true
+  if git diff --quiet HEAD^ HEAD -- "$path"; then
+    echo "This push does not change ${path}; its unreleased changes wait for the next one that does." >&2
+    echo "skip"
+    exit 0
+  fi
 fi
 
 # Strip CR: the merge UI submits textarea content without git's
@@ -72,10 +87,18 @@ fi
 # match on the Release-As trailer below.
 subjects=$(git log "$range" --pretty=%s -- "$path" | tr -d '\r')
 messages=$(git log "$range" --pretty=%B -- "$path" | tr -d '\r')
-if git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
+if [ "$has_parent" = true ]; then
   merged=$(git log HEAD^..HEAD --pretty=%B -- "$path" | tr -d '\r')
 else
   merged=$(git log -1 --pretty=%B | tr -d '\r')
+fi
+# A path-limited log drops a merge commit whose tree matches one side for
+# MODULE/, so a trailer written in the merge commit's own message would be
+# lost. The push already changed MODULE/ (checked above), so read it too.
+if git rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
+  head_message=$(git log -1 --pretty=%B HEAD | tr -d '\r')
+  messages=$(printf '%s\n%s\n' "$messages" "$head_message")
+  merged=$(printf '%s\n%s\n' "$merged" "$head_message")
 fi
 
 # A squash merge collapses the branch into one commit whose body
@@ -169,6 +192,23 @@ case "$level" in
   minor) minor=$((minor + 1)); patch=0 ;;
   patch) patch=$((patch + 1)) ;;
 esac
+
+# A module's first release is v0.1.0 unless its commits ask for more.
+if [ "$first_release" = true ] && [ "$major" -eq 0 ] && [ "$minor" -eq 0 ]; then
+  minor=1
+  patch=0
+fi
+
+# From v2 on, Go requires the major version in the module path. A tag the
+# path does not match is not served as that version, and a published tag
+# cannot be withdrawn, so refuse rather than publish it.
+if [ "$major" -ge 2 ]; then
+  module_path=$(sed -nE 's/^module[[:space:]]+([^[:space:]]+).*/\1/p' "${path}go.mod" 2>/dev/null || true)
+  if [[ "$module_path" != */v"$major" ]]; then
+    echo "${module}/v${major} needs ${path}go.mod to declare a module path ending in /v${major} (found: '${module_path}')." >&2
+    exit 1
+  fi
+fi
 
 next="${module}/v${major}.${minor}.${patch}"
 echo "Bumping ${tag} -> ${next} (${level})" >&2

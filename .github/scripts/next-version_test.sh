@@ -69,8 +69,18 @@ expect "any type with ! -> breaking" mod/v0.1.0
 repo e mod/v1.2.3; commit "feat: a feature"
 expect "feat at v1.x -> minor" mod/v1.3.0
 
-repo f mod/v1.2.3; commit "feat!: a breaking change"
+# From v2 on, Go needs the major version in the module path; a tag the path
+# does not match would never be served as that version.
+repo f mod/v1.2.3; mkdir mod; echo "module example.com/mod/v2" > mod/go.mod
+commit "feat!: a breaking change"
 expect "breaking at v1.x -> major" mod/v2.0.0
+
+repo f2 mod/v1.2.3; mkdir mod; echo "module example.com/mod" > mod/go.mod
+commit "feat!: a breaking change"
+expect "v2 without a /v2 module path is refused" "<script failed>"
+
+repo f3 mod/v1.2.3; commit "feat!: a breaking change"
+expect "v2 without a go.mod is refused" "<script failed>"
 
 repo g mod/v1.2.3; commit "docs: a doc change"
 expect "other types -> patch" mod/v1.2.4
@@ -279,6 +289,14 @@ expect "fast-forward reads the branch commits" mod/v0.1.0
 repo t; commit "feat!: first"
 expect "no tags at all starts from v0.0.0" mod/v0.1.0
 
+repo t2; commit "fix: first"
+expect "a first release is at least v0.1.0" mod/v0.1.0
+
+repo t3; commit "feat: first
+
+Release-As: major"
+expect "a first release can still ask for more" mod/v1.0.0
+
 repo u mod/v0.0.5; git tag mod/v0.0.6-rc1; commit "fix: x"
 expect "prerelease tags are skipped" mod/v0.0.6
 
@@ -297,9 +315,22 @@ repo x2 mod/v0.1.0 other/v0.1.0
 commit "fix: other
 
 Release-As: major" other
+expect "a trailer applies to the module it touched" other/v1.0.0 other
 commit "fix: mod"
-expect "a trailer on another module's commit does not apply" mod/v0.1.1
-expect "but applies to the module it touched" other/v1.0.0 other
+expect "but not to another module" mod/v0.1.1
+
+# A module is released only by a push that changes it. Commits carried from an
+# earlier push - a skipped one, or one whose release run failed - wait for the
+# next change to the module instead of publishing an identical version.
+repo x2b mod/v0.1.0
+commit "ci: tidy the module
+
+Release-As: skip"
+expect "a skipped push" skip
+commit "docs: unrelated" other
+expect "is not released by a push that leaves the module alone" skip
+commit "fix: a real change"
+expect "but by its next change, carrying the skipped commit" mod/v0.1.1
 
 repo x3 v0.9.0 other/v3.0.0 mod/v0.0.5; commit "fix: x"
 expect "legacy and other-module tags are ignored" mod/v0.0.6
@@ -328,6 +359,27 @@ Release-As: minor
 * Also the other module"
 expect "a squash across modules releases mod at the shared level" mod/v0.1.0
 expect "and the other module too" other/v0.3.0 other
+
+# A path-limited log drops a merge commit whose tree matches the branch for
+# the module, so the trailer in the merge commit's own message must still be
+# read.
+repo x7 mod/v0.1.0
+git checkout -q -b feature
+commit "fix: x"
+git checkout -q -
+git merge -q --no-ff -m "Merge pull request #1 from feature
+
+Release-As: major" feature
+expect "a trailer in the merge commit's own message counts" mod/v1.0.0
+
+repo x7b mod/v0.1.0
+git checkout -q -b feature
+commit "fix: x"
+git checkout -q -
+git merge -q --no-ff -m "Merge pull request #1 from feature
+
+Release-As: skip" feature
+expect "and so does a skip there" skip
 
 repo x6 mod/v0.0.5; commit "fix: x"
 expect "a module name with a slash is refused" "<script failed>" "mod/sub"

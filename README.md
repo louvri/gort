@@ -70,10 +70,12 @@ See each submodule's README for detailed API documentation.
 
 ## Releasing
 
-Merging to `main` tags a release of every module the merge changed, as `<module>/vX.Y.Z`. The level comes from the commits since that module's last tag:
+Merging to `main` tags a release, `<module>/vX.Y.Z`, of every module the merge changed. The level comes from the commits touching that module since its last tag:
 
-- A `Release-As: major|minor|patch` trailer on its own line sets it explicitly; `Release-As: skip` publishes nothing for that push.
-- Otherwise a breaking change (`type!:` subject or `BREAKING CHANGE:` footer) is a minor bump below v1.0.0 and a major one after; everything else is a patch.
+- A `Release-As: major|minor|patch` trailer on its own line sets it explicitly; `Release-As: skip` publishes nothing, and those changes ship with the module's next change.
+- Otherwise a breaking change (a `type!:` subject or a `BREAKING CHANGE:` footer) is a minor bump below v1.0.0 and a major one from then on; from v1.0.0 a `feat:` subject is a minor bump; everything else is a patch.
+- Merges are squashed, so a pull request's trailers and markers apply to every module it touches.
+- A module's first release is v0.1.0. From v2 on, its `go.mod` must declare the matching `/vN` module path, or the release is refused.
 
 The rules are pinned by `.github/scripts/next-version_test.sh`.
 

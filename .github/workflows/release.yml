@@ -7,6 +7,13 @@ on:
 permissions:
   contents: write
 
+# Each run derives its tags from the commits since the last ones, so two runs
+# must not compute from the same base. Queued runs are not cancelled mid-way;
+# a newer queued run supersedes an older one, and its range covers both.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Release (${{ matrix.module }})
@@ -19,10 +26,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The newest stable tag, which is what next-version.sh bumps from: a
+      # prerelease tag must not become the base of the release notes. awk reads
+      # the whole list so git is never cut off by a closed pipe.
       - name: Get latest module tag
         id: latest_tag
         run: |
-          latest=$(git tag -l '${{ matrix.module }}/v*' --sort=-v:refname | head -n 1)
+          latest=$(git tag -l '${{ matrix.module }}/v*' --sort=-v:refname \
+            | awk -v re='^${{ matrix.module }}/v[0-9]+[.][0-9]+[.][0-9]+$' '!found && $0 ~ re { print; found = 1 }')
           echo "tag=${latest}" >> "$GITHUB_OUTPUT"
 
       # The level comes from Release-As trailers and conventional-commit
