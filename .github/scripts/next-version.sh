@@ -1,38 +1,47 @@
 #!/usr/bin/env bash
 # Usage: next-version.sh MODULE
+#        next-version.sh --base MODULE
 #
 # Prints the tag for MODULE's next release (MODULE/vX.Y.Z), or "skip" when
-# there is nothing to release. Diagnostics go to stderr so stdout stays
-# machine-readable.
+# there is nothing to release. With --base, prints the release tag that the
+# next version is computed from instead (empty before the first release), so
+# release notes start where the version bump does. Diagnostics go to stderr
+# so stdout stays machine-readable.
 #
 # Each module is versioned on its own: its tags are MODULE/v*, and only
 # commits that touch MODULE/ count towards its release, so a trailer on a
 # commit that only changes another module does not move this one. A squash
 # merge is a single commit, though, so a pull request's markers apply to
-# every module it touches. A module is released only by a push that changes
-# it; changes a push carries without touching the module wait for its next
-# change rather than publishing a version nothing asked for.
+# every module it touches.
 #
-# The release level comes from every such commit since the module's last
-# release tag, so it does not depend on whether a pull request was squashed,
-# merged or rebased.
+# The release is computed from every commit since the module's last release
+# tag, not from what the latest push introduced, so a push whose release run
+# was superseded or failed is carried by the next run instead of lost, and
+# the result does not depend on whether a pull request was squashed, merged
+# or rebased.
 #
-# "Release-As: skip" is the exception: it is read only from what the push
-# introduced, because skipping creates no tag and a skip read from the whole
-# range would still be in the range next time, disabling releases for good.
-# That covers a squash and a merge commit; a rebase that leaves the trailer on
-# a commit below the tip releases normally and says so. See
+# "Release-As: skip" marks its commit - and, on a merge commit, the branch
+# that merge brought in - as needing no release. Only commits without it can
+# trigger one; skipped changes ship with the module's next real change. See
 # next-version_test.sh for the behaviour this must keep.
 set -euo pipefail
+
+mode=next
+if [ "${1:-}" = "--base" ]; then
+  mode=base
+  shift
+fi
 
 module="${1:-}"
 # The name is used in a tag glob, a regex and a pathspec; keep it to
 # characters that mean the same thing in all three.
 if [[ ! "$module" =~ ^[a-z0-9_-]+$ ]]; then
-  echo "usage: next-version.sh MODULE (a top-level module directory name)" >&2
+  echo "usage: next-version.sh [--base] MODULE (a top-level module directory name)" >&2
   exit 2
 fi
 path="${module}/"
+
+skip_trailer='^Release-As:[[:space:]]*skip[[:space:]]*$'
 
 # Read the tag list into a variable rather than piping to head: with
 # `pipefail`, git being SIGPIPE'd once the list outgrows the pipe
@@ -40,8 +49,7 @@ path="${module}/"
 tags=$(git tag --sort=-v:refname --list "${module}/v[0-9]*.[0-9]*.[0-9]*")
 
 # Take the newest tag that is exactly MODULE/vMAJOR.MINOR.PATCH; the glob
-# above still admits things like MODULE/v1.2.3-rc1. If no stable tag exists
-# at all, start from MODULE/v0.0.0.
+# above still admits things like MODULE/v1.2.3-rc1.
 tag=""
 major=0
 minor=0
@@ -56,9 +64,11 @@ while IFS= read -r candidate; do
   fi
 done <<< "$tags"
 
-# Read every commit since that tag rather than only the tip, so the
-# bump does not depend on whether the pull request was squashed,
-# merged or rebased.
+if [ "$mode" = base ]; then
+  echo "$tag"
+  exit 0
+fi
+
 first_release=false
 if [ -n "$tag" ]; then
   range="${tag}..HEAD"
@@ -67,48 +77,68 @@ else
   range="HEAD"
   first_release=true
 fi
-if [ -z "$(git rev-list -n 1 "$range" -- "$path")" ]; then
+
+# Every commit since the tag that changed the module.
+commits=$(git rev-list "$range" -- "$path")
+if [ -z "$commits" ]; then
   echo "No changes to ${path} since ${tag}; nothing to release." >&2
   echo "skip"
   exit 0
 fi
-has_parent=false
-if git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
-  has_parent=true
-  if git diff --quiet HEAD^ HEAD -- "$path"; then
-    echo "This push does not change ${path}; its unreleased changes wait for the next one that does." >&2
-    echo "skip"
-    exit 0
+
+# Commits marked Release-As: skip. The scan covers the whole range rather
+# than only the module's commits, because a path-limited walk drops a merge
+# commit whose tree matches the branch it merged - and a skip written on the
+# merge covers everything that branch brought in. Messages are read into a
+# variable before grep: with `pipefail`, grep -q exiting early would fail
+# the pipeline and read as "no match".
+skipped=""
+merges=""
+while IFS= read -r commit; do
+  [ -n "$commit" ] || continue
+  message=$(git log -1 --pretty=%B "$commit" | tr -d '\r')
+  is_merge=false
+  if git rev-parse -q --verify "${commit}^2" >/dev/null 2>&1; then
+    is_merge=true
   fi
+  if grep -qE "$skip_trailer" <<< "$message"; then
+    skipped=$(printf '%s\n%s\n' "$skipped" "$commit")
+    if [ "$is_merge" = true ]; then
+      skipped=$(printf '%s\n%s\n' "$skipped" "$(git rev-list "${commit}^1..${commit}^2")")
+    fi
+  elif [ "$is_merge" = true ] && ! git diff --quiet "${commit}^1" "$commit" -- "$path"; then
+    merges=$(printf '%s\n%s\n' "$merges" "$commit")
+  fi
+done <<< "$(git rev-list "$range")"
+
+releasable=""
+while IFS= read -r commit; do
+  if ! grep -qxF "$commit" <<< "$skipped"; then
+    releasable=$(printf '%s\n%s\n' "$releasable" "$commit")
+  fi
+done <<< "$commits"
+releasable=$(sed '/^$/d' <<< "$releasable")
+if [ -z "$releasable" ]; then
+  echo "Every change to ${path} since ${tag} is marked Release-As: skip; nothing to release." >&2
+  echo "skip"
+  exit 0
 fi
 
 # Strip CR: the merge UI submits textarea content without git's
 # message cleanup, and a trailing CR would defeat the whole-line
-# match on the Release-As trailer below.
-subjects=$(git log "$range" --pretty=%s -- "$path" | tr -d '\r')
-messages=$(git log "$range" --pretty=%B -- "$path" | tr -d '\r')
-if [ "$has_parent" = true ]; then
-  merged=$(git log HEAD^..HEAD --pretty=%B -- "$path" | tr -d '\r')
-else
-  merged=$(git log -1 --pretty=%B | tr -d '\r')
-fi
-# A path-limited log drops a merge commit whose tree matches one side for
-# MODULE/, so a trailer written in the merge commit's own message would be
-# lost. The push already changed MODULE/ (checked above), so read it too.
-if git rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
-  head_message=$(git log -1 --pretty=%B HEAD | tr -d '\r')
-  messages=$(printf '%s\n%s\n' "$messages" "$head_message")
-  merged=$(printf '%s\n%s\n' "$merged" "$head_message")
-fi
+# match on the Release-As trailer below. A merge commit that changed the
+# module carries its own message too, which a path-limited walk would drop.
+subjects=$(git log --no-walk=unsorted --stdin --pretty=%s <<< "$releasable" | tr -d '\r')
+messages=$(printf '%s\n%s\n' "$releasable" "$merges" | sed '/^$/d' \
+  | git log --no-walk=unsorted --stdin --pretty=%B | tr -d '\r')
 
-# A squash merge collapses the branch into one commit whose body
-# lists the original subjects as "* subject", so read those as
-# subjects too - otherwise a squash with a non-conventional title
-# hides the breaking change that the commits themselves declared.
-# Only when the range really is one commit: over a longer range, an
-# ordinary markdown bullet in a commit body would otherwise get to
-# choose the release level.
-if [ "$(git rev-list --count "$range" -- "$path")" -eq 1 ]; then
+# A GitHub squash merge collapses the branch into one commit titled
+# "<pull request title> (#N)" whose body lists the original subjects as
+# "* subject", so read those as subjects too - otherwise a squash with a
+# non-conventional title hides the breaking change that the commits
+# themselves declared. Only for that shape: in any other commit, an
+# ordinary markdown bullet would otherwise get to choose the release level.
+if [ "$(wc -l <<< "$releasable")" -eq 1 ] && grep -qE ' \(#[0-9]+\)$' <<< "$subjects"; then
   status=0
   bullets=$(grep -E '^\* ' <<< "$messages") || status=$?
   if [ "$status" -gt 1 ]; then
@@ -135,26 +165,6 @@ elif grep -qE '^Release-As:[[:space:]]*minor[[:space:]]*$' <<< "$messages"; then
   level="minor"
 elif grep -qE '^Release-As:[[:space:]]*patch[[:space:]]*$' <<< "$messages"; then
   level="patch"
-elif grep -qE '^Release-As:[[:space:]]*skip[[:space:]]*$' <<< "$merged"; then
-  # Nothing here reaches a consumer - a workflow change, a README edit - so
-  # publishing a version identical to the last one would be noise.
-  #
-  # Read from what this push introduced, unlike every other level, which reads
-  # the whole range. Skipping creates no tag, so a skip found anywhere in the
-  # range would still be in the range on the next push, and every release after
-  # it would skip too - one skip would disable releases permanently. Reading
-  # only the merged commits makes a skip defer rather than suppress: the next
-  # push releases normally and carries the skipped commits with it.
-  echo "Release-As: skip; nothing to release." >&2
-  echo "skip"
-  exit 0
-elif grep -qE '^Release-As:[[:space:]]*skip[[:space:]]*$' <<< "$messages"; then
-  # Spelled correctly, just not on what this push introduced. Usually this is
-  # a previous push that deliberately skipped and is now being carried - so
-  # describe the outcome rather than implying the operator got something
-  # wrong. The range alone cannot tell that apart from a rebase that left the
-  # trailer below the tip.
-  echo "A Release-As: skip earlier in the range does not apply to this push; releasing normally and carrying those commits." >&2
 elif grep -qE '^Release-As:' <<< "$messages"; then
   # Present but unreadable: say so rather than fall through to the commit
   # subject, which would silently produce a different version.

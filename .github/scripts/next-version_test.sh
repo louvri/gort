@@ -183,14 +183,14 @@ repo p6 mod/v0.1.0; commit "ci: x
 Release-As: skip"; commit "feat!: a real change"
 expect "a skip below the merged commits does not skip" mod/v0.2.0
 
-# An explicit release level anywhere in the range outranks a skip on the
-# merged commit.
+# A skip covers only its own commit: a change carried from an earlier push
+# still releases, at the level it asked for.
 repo p6c mod/v0.1.0; commit "ci: x
 
 Release-As: patch"; commit "ci: y
 
 Release-As: skip"
-expect "an explicit level in the range outranks a merged skip" mod/v0.1.1
+expect "a carried change still releases alongside a skip" mod/v0.1.1
 
 repo p6d mod/v0.1.0; commit "ci: y
 
@@ -384,6 +384,38 @@ expect "and so does a skip there" skip
 repo x6 mod/v0.0.5; commit "fix: x"
 expect "a module name with a slash is refused" "<script failed>" "mod/sub"
 expect "a missing module name is refused" "<script failed>" ""
+
+# --- the range, not the tip, decides ----------------------------------------
+# A push of several commits, or a run superseded by a newer push, must not
+# lose a change because the tip commit does not touch the module.
+repo y1 mod/v0.0.5; commit "feat!: x"; commit "chore: y" other
+expect "a module change below a tip that leaves it alone still releases" mod/v0.1.0
+
+# Only a GitHub squash title "(#N)" marks body bullets as squashed subjects.
+repo y2 mod/v1.0.0; commit "fix: typo
+
+Notes:
+* feat!: was considered but not done"
+expect "bullets in an ordinary commit body are inert" mod/v1.0.1
+
+# --- base tag for release notes ---------------------------------------------
+expect_base() {
+  local description="$1" want="$2" module="${3-mod}" got
+  total=$((total + 1))
+  got="$("$script" --base "$module" 2>/dev/null)" || got="<script failed>"
+  if [ "$got" = "$want" ]; then
+    printf 'ok   %s\n' "$description"
+  else
+    printf 'FAIL %s\n       want %s\n       got  %s\n' "$description" "$want" "$got"
+    failures=$((failures + 1))
+  fi
+}
+
+repo z1 mod/v0.0.5 other/v9.9.9; git tag mod/v0.1.0-rc1
+expect_base "base is the newest stable tag of the module" mod/v0.0.5
+
+repo z2 other/v1.0.0
+expect_base "base is empty before the first release" ""
 
 # ----------------------------------------------------------------------------
 cd /
