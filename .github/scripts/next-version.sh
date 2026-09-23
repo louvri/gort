@@ -115,8 +115,15 @@ raise() {
 # and levels are matched case-insensitively, as git treats trailer keys;
 # whitespace the merge UI adds around the level is tolerated.
 release_as_levels() {
+  local status=0
+  # grep exits 1 when there is no trailer; anything above that is a failing
+  # tool, and reading it as "no trailers" would publish a different version.
   levels=$(grep -iE '^Release-As:' <<< "$1" | tr '[:upper:]' '[:lower:]' \
-    | sed -E 's/^release-as:[[:space:]]*//; s/[[:space:]]*$//') || true
+    | sed -E 's/^release-as:[[:space:]]*//; s/[[:space:]]*$//') || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "failed to read Release-As trailers" >&2
+    exit 1
+  fi
 }
 
 # rank_change SUBJECTS MESSAGE DEFAULT - set `ranked` to the release rank one
@@ -136,7 +143,7 @@ release_as_levels() {
 # never piped from git: with `pipefail`, grep -q exiting early would fail
 # the pipeline and read as "no match".
 rank_change() {
-  local subjects="$1" message="$2" default="$3" markers=0
+  local subjects="$1" message="$2" default="$3" markers=0 explicit=""
   release_as_levels "$message"
   # Below v1.0.0, semver keeps breaking changes in the minor position and
   # everything else in the patch position.
@@ -148,14 +155,15 @@ rank_change() {
   fi
   carried="$markers"
   if grep -qx major <<< "$levels"; then
-    ranked=3
+    explicit=3
   elif grep -qx minor <<< "$levels"; then
-    ranked=2
+    explicit=2
   elif grep -qx patch <<< "$levels"; then
-    ranked=1
+    explicit=1
   elif grep -qx skip <<< "$levels"; then
-    ranked=skip
-  else
+    explicit=skip
+  fi
+  if [ -z "$explicit" ]; then
     if [ -n "$levels" ]; then
       # Present but unreadable: say so rather than fall through to the
       # markers, which would silently produce a different version.
@@ -164,6 +172,13 @@ rank_change() {
     ranked="$markers"
     if [ "$markers" -eq 0 ]; then
       ranked="$default"
+    fi
+  else
+    ranked="$explicit"
+    if [ "$explicit" != skip ] && [ "$explicit" -lt "$markers" ]; then
+      # Allowed - an internal-only breaking change can ship as a patch - but
+      # said where the release log shows it.
+      echo "Release-As on '${subjects%%$'\n'*}' ranks below its own breaking or feature marker; releasing at the lower level it asks for." >&2
     fi
   fi
 }

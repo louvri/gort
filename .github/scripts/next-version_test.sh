@@ -642,6 +642,27 @@ git merge -q --no-ff -m "Merge a, b and c
 Release-As: skip" a b c
 expect "an octopus merge's skip covers its third branch" skip
 
+# A failing tool while reading trailers fails the step: reading "no
+# trailers" instead would publish a different, immutable tag.
+mkdir -p "$workdir/badsed"
+printf '#!/bin/sh\necho "sed exploded" >&2\nexit 4\n' > "$workdir/badsed/sed"
+chmod +x "$workdir/badsed/sed"
+repo c23 mod/v0.2.3; commit "feat!: x
+
+Release-As: patch"
+expect "a trailer that lowers its own change's marker is honoured" mod/v0.2.4
+PATH="$workdir/badsed:$PATH" expect "a tool failing while reading trailers fails the step" "<script failed>"
+
+# Lowering a change below its own marker is allowed, but said out loud.
+total=$((total + 1))
+stderr=$("$script" mod 2>&1 >/dev/null) || true
+if grep -q "ranks below its own" <<< "$stderr"; then
+  printf 'ok   %s\n' "a trailer lowering its own marker is reported"
+else
+  printf 'FAIL %s\n' "a trailer lowering its own marker is reported"
+  failures=$((failures + 1))
+fi
+
 # --- base tag for release notes ---------------------------------------------
 expect_base() {
   local description="$1" want="$2" module="${3-mod}" got
