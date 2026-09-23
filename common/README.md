@@ -26,7 +26,7 @@ Extracts and returns the token from a `Bearer <token>` authorization header. Ret
 
 Returns a `jwt.Keyfunc` for use with `jwt.Parse`. Validates that the signing algorithm matches the key type (HMAC for symmetric, RSA for asymmetric) to prevent algorithm confusion attacks.
 
-- `symmetric=true` — expects HMAC-signed tokens, uses `key` as the shared secret; an empty `key` is rejected
+- `symmetric=true` — expects HMAC-signed tokens, uses `key` as the shared secret; an empty `key` is rejected with `ErrEmptyHMACKey`
 - `symmetric=false` — expects RSA-signed tokens, parses `key` as a PEM-encoded RSA public key
 
 #### `GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims, error)`

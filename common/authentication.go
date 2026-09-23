@@ -14,9 +14,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// errEmptyHMACKey is returned instead of signing or verifying with an empty
-// HMAC key, which would let anyone forge tokens.
-var errEmptyHMACKey = errors.New("empty HMAC key")
+// ErrEmptyHMACKey is returned instead of signing or verifying with an empty
+// HMAC key, which would let anyone forge tokens. It indicates a misconfigured
+// secret rather than a bad token, so callers can tell the two apart with
+// errors.Is.
+var ErrEmptyHMACKey = errors.New("empty HMAC key")
 
 // GenerateAuthToken mints an HS256-signed JWT for sub, verifiable via
 // JWTKeyFunc(jwtKey, true). The variadic data is stored under the "data" claim:
@@ -27,7 +29,7 @@ var errEmptyHMACKey = errors.New("empty HMAC key")
 // production callers). An empty jwtKey is rejected.
 func GenerateAuthToken(sub, jwtKey string, jwtLifetimeInMinute int, data ...any) (string, error) {
 	if jwtKey == "" {
-		return "", errEmptyHMACKey
+		return "", ErrEmptyHMACKey
 	}
 
 	now := time.Now()
@@ -101,7 +103,7 @@ func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			if key == "" {
-				return nil, errEmptyHMACKey
+				return nil, ErrEmptyHMACKey
 			}
 			return []byte(key), nil
 		}

@@ -11,6 +11,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// errEmptyHMACKey rejects verification with an empty HMAC key, which would
+// accept tokens anyone can sign with that same empty key.
+var errEmptyHMACKey = errors.New("empty HMAC key")
+
 func getBearerToken(r *http.Request) string {
 	token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !found {
@@ -26,7 +30,7 @@ func jwtKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			if key == "" {
-				return nil, errors.New("empty HMAC key")
+				return nil, errEmptyHMACKey
 			}
 			return []byte(key), nil
 		}

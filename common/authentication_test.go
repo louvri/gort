@@ -106,7 +106,7 @@ func TestJWTKeyFunc(t *testing.T) {
 	t.Run("symmetric rejects empty key", func(t *testing.T) {
 		keyFunc := JWTKeyFunc("", true)
 		result, err := keyFunc(&jwt.Token{Method: jwt.SigningMethodHS256, Header: map[string]any{"alg": "HS256"}})
-		assert.ErrorIs(t, err, errEmptyHMACKey)
+		assert.ErrorIs(t, err, ErrEmptyHMACKey)
 		assert.Nil(t, result)
 	})
 
@@ -139,7 +139,7 @@ func TestGenerateAuthToken(t *testing.T) {
 
 	t.Run("rejects empty key", func(t *testing.T) {
 		token, err := GenerateAuthToken("user-1", "", 60)
-		assert.ErrorIs(t, err, errEmptyHMACKey)
+		assert.ErrorIs(t, err, ErrEmptyHMACKey)
 		assert.Empty(t, token)
 	})
 
