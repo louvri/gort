@@ -6,11 +6,11 @@ Each submodule is independently importable so you only pull in the dependencies 
 
 ## Modules
 
-| Module | Install | Description |
-|--------|---------|-------------|
-| [common](./common) | `go get github.com/louvri/gort/common` | Framework-agnostic JWT parsing, bearer token extraction, and timezone utilities |
-| [echo](./echo) | `go get github.com/louvri/gort/echo` | Authentication and maintenance middleware for [Echo](https://github.com/labstack/echo) |
-| [gin](./gin) | `go get github.com/louvri/gort/gin` | Authentication and maintenance middleware for [Gin](https://github.com/gin-gonic/gin) |
+| Module | Install | Go | Description |
+|--------|---------|----|-------------|
+| [common](./common) | `go get github.com/louvri/gort/common` | 1.25+ | Framework-agnostic JWT parsing, bearer token extraction, and timezone utilities |
+| [echo](./echo) | `go get github.com/louvri/gort/echo` | 1.26+ | Authentication and maintenance middleware for [Echo](https://github.com/labstack/echo) |
+| [gin](./gin) | `go get github.com/louvri/gort/gin` | 1.26+ | Authentication and maintenance middleware for [Gin](https://github.com/gin-gonic/gin) |
 
 ## Quick Start
 

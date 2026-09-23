@@ -8,6 +8,8 @@ Framework-agnostic utilities for JWT handling, bearer token extraction, and time
 go get github.com/louvri/gort/common
 ```
 
+Requires Go 1.25 or later.
+
 ## API
 
 ### Authentication

@@ -8,6 +8,8 @@ Authentication and maintenance middleware for the [Gin](https://github.com/gin-g
 go get github.com/louvri/gort/gin
 ```
 
+Requires Go 1.26 or later.
+
 ## Middleware
 
 ### `JWTAuthValidatorMiddleware`

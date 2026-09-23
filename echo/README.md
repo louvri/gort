@@ -8,6 +8,8 @@ Authentication and maintenance middleware for the [Echo](https://github.com/labs
 go get github.com/louvri/gort/echo
 ```
 
+Requires Go 1.26 or later.
+
 ## Middleware
 
 ### `JWTAuthValidatorMiddleware`
