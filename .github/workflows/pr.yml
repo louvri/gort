@@ -31,41 +31,77 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go vet ./...
 
+      # Tool versions are pinned: `latest` lets a tool release turn an
+      # unrelated PR red.
       - name: Run staticcheck
         working-directory: ${{ matrix.module }}
-        run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          staticcheck ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      # Fails only on vulnerabilities reachable from gort's code, checked
+      # against the latest patch release of the newest supported Go.
+      - name: Run govulncheck
+        working-directory: ${{ matrix.module }}
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  release-script:
+    name: Release script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck release scripts
+        run: shellcheck .github/scripts/*.sh
+
+      - name: Test release versioning
+        run: .github/scripts/next-version_test.sh
 
   build:
-    name: Build
+    name: Build (${{ matrix.module }}, go ${{ matrix.go }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [common, echo, gin]
+        # Each module on its declared floor (the go directive in its go.mod)
+        # and on the newest release, so the floor is exercised rather than
+        # only declared.
+        include:
+          - { module: common, go: "1.25.x" }
+          - { module: common, go: "1.27.x" }
+          - { module: echo, go: "1.26.x" }
+          - { module: echo, go: "1.27.x" }
+          - { module: gin, go: "1.26.x" }
+          - { module: gin, go: "1.27.x" }
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.27.x"
+          go-version: ${{ matrix.go }}
 
       - name: Build
         working-directory: ${{ matrix.module }}
         run: go build ./...
 
   test:
-    name: Test
+    name: Test (${{ matrix.module }}, go ${{ matrix.go }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [common, echo, gin]
+        # Each module on its declared floor (the go directive in its go.mod)
+        # and on the newest release, so the floor is exercised rather than
+        # only declared.
+        include:
+          - { module: common, go: "1.25.x" }
+          - { module: common, go: "1.27.x" }
+          - { module: echo, go: "1.26.x" }
+          - { module: echo, go: "1.27.x" }
+          - { module: gin, go: "1.26.x" }
+          - { module: gin, go: "1.27.x" }
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.27.x"
+          go-version: ${{ matrix.go }}
 
       - name: Test
         working-directory: ${{ matrix.module }}
