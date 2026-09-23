@@ -1,3 +1,6 @@
+// Package common provides framework-agnostic helpers for JWT minting and
+// verification, bearer token extraction, and timezone parsing shared by the
+// gort echo and gin middleware.
 package common
 
 import (
@@ -63,10 +66,13 @@ func GenerateAuthTokenAsym(sub, jwtPrivKey string, jwtLifetimeInMinute int, data
 	return tokenString, nil
 }
 
+// GetAuthorizationHeaderValue returns the raw Authorization header of r.
 func GetAuthorizationHeaderValue(r *http.Request) string {
 	return r.Header.Get("Authorization")
 }
 
+// GetBearerToken returns the token from a "Bearer <token>" Authorization
+// header, or "" when the header is missing or uses another scheme.
 func GetBearerToken(r *http.Request) string {
 	token, found := strings.CutPrefix(GetAuthorizationHeaderValue(r), "Bearer ")
 	if !found {
@@ -75,6 +81,10 @@ func GetBearerToken(r *http.Request) string {
 	return token
 }
 
+// JWTKeyFunc returns a jwt.Keyfunc that pins the signing algorithm family to
+// the key type, preventing algorithm-confusion attacks: symmetric expects
+// HMAC and uses key as the shared secret; otherwise it expects RSA and parses
+// key as a PEM-encoded public key.
 func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 	return func(token *jwt.Token) (any, error) {
 		if symmetric {
@@ -95,6 +105,9 @@ func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 	}
 }
 
+// GetMapClaimsFromJWT verifies bearerToken's signature using
+// JWTKeyFunc(key, symmetric), rejects it if its exp or nbf claim (when
+// present) is out of range, and returns its claims.
 func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(bearerToken, JWTKeyFunc(key, symmetric))
 	if err != nil {
@@ -109,6 +122,10 @@ func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims
 	return nil, errors.New("claim type is not map")
 }
 
+// GetMapClaimsFromJWTWithoutValidation decodes bearerToken's claims WITHOUT
+// verifying its signature or expiry, so the result must never be used for
+// authentication or authorization. It returns nil if the token is malformed
+// or has no claims.
 func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
 	parser := jwt.NewParser()
 	claims := jwt.MapClaims{}

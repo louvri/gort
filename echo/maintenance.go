@@ -7,6 +7,9 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// ProbeMaintenanceMiddleware rejects every request with statusCode and
+// errorMessage while enabled, except those whose URL path starts with one of
+// skippedPaths.
 func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, statusCode int, enabled bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -23,6 +26,9 @@ func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, stat
 	}
 }
 
+// ScheduledMaintenanceMiddleware behaves like ProbeMaintenanceMiddleware while
+// the current time is within [from, to]. A zero from starts the window
+// immediately, a zero to leaves it open-ended, and both zero disables it.
 func ScheduledMaintenanceMiddleware(skippedPaths []string, errorMessage string, statusCode int, from, to time.Time) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
