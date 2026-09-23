@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -35,4 +36,10 @@ func jwtKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 		}
 		return verifyKey, nil
 	}
+}
+
+// matchesServerKey reports whether value equals key in constant time. An empty
+// key never matches, so an unset key cannot authorize a missing header.
+func matchesServerKey(value, key string) bool {
+	return key != "" && subtle.ConstantTimeCompare([]byte(value), []byte(key)) == 1
 }

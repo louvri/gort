@@ -176,3 +176,38 @@ func TestServerKeyAuthValidatorMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }
+
+func TestServerKeyAuthValidatorMiddlewareEmptyKeys(t *testing.T) {
+	tests := []struct {
+		name              string
+		serverKey         string
+		expiringServerKey string
+		header            *string
+		wantCode          int
+	}{
+		{"no expiring key, missing header", "primary-key", "", nil, http.StatusUnauthorized},
+		{"no expiring key, empty header", "primary-key", "", new(""), http.StatusUnauthorized},
+		{"no expiring key, primary key", "primary-key", "", new("primary-key"), http.StatusOK},
+		{"no primary key, missing header", "", "expiring-key", nil, http.StatusUnauthorized},
+		{"no primary key, expiring key", "", "expiring-key", new("expiring-key"), http.StatusOK},
+		{"no keys, missing header", "", "", nil, http.StatusUnauthorized},
+		{"no keys, empty header", "", "", new(""), http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := echo.New()
+			e.Use(ServerKeyAuthValidatorMiddleware("X-Server-Token", tt.serverKey, tt.expiringServerKey, "Invalid token/session"))
+			e.GET("/", func(c echo.Context) error {
+				return c.String(http.StatusOK, "Hello World")
+			})
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.header != nil {
+				req.Header.Set("X-Server-Token", *tt.header)
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantCode, rec.Code)
+		})
+	}
+}

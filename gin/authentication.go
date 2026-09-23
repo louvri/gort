@@ -3,7 +3,6 @@
 package gin
 
 import (
-	"crypto/subtle"
 	"log/slog"
 	"net/http"
 
@@ -47,12 +46,12 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric,
 // ServerKeyAuthValidatorMiddleware admits requests whose headerKey header
 // equals serverKey or expiringServerKey (the latter supports key rotation),
 // compared in constant time; others get 401 with unauthorizedErrorMessage.
-// Both keys must be non-empty: an empty key matches a missing header.
+// An empty serverKey or expiringServerKey never matches, so the rotation slot
+// can be left "" when unused.
 func ServerKeyAuthValidatorMiddleware(headerKey, serverKey, expiringServerKey, unauthorizedErrorMessage string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		headerValue := c.Request.Header.Get(headerKey)
-		if subtle.ConstantTimeCompare([]byte(headerValue), []byte(serverKey)) == 1 ||
-			subtle.ConstantTimeCompare([]byte(headerValue), []byte(expiringServerKey)) == 1 {
+		if matchesServerKey(headerValue, serverKey) || matchesServerKey(headerValue, expiringServerKey) {
 			c.Next()
 			return
 		}

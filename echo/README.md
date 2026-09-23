@@ -42,8 +42,10 @@ Validates requests using a static API key in a custom header. Supports key rotat
 
 - `headerKey` — header name to read the key from
 - `serverKey` — primary API key
-- `expiringServerKey` — secondary key for rotation (both are accepted)
+- `expiringServerKey` — secondary key for rotation (both are accepted); pass `""` when not rotating
 - `unauthorizedErrorMessage` — message returned on auth failure
+
+An empty key never matches, so a request without the header is always rejected.
 
 ```go
 // Internal routes with server key auth
