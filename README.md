@@ -68,6 +68,15 @@ func main() {
 
 See each submodule's README for detailed API documentation.
 
+## Releasing
+
+Merging to `main` tags a release of every module the merge changed, as `<module>/vX.Y.Z`. The level comes from the commits since that module's last tag:
+
+- A `Release-As: major|minor|patch` trailer on its own line sets it explicitly; `Release-As: skip` publishes nothing for that push.
+- Otherwise a breaking change (`type!:` subject or `BREAKING CHANGE:` footer) is a minor bump below v1.0.0 and a major one after; everything else is a patch.
+
+The rules are pinned by `.github/scripts/next-version_test.sh`.
+
 ## License
 
 gort is released under the [MIT License](http://www.opensource.org/licenses/mit-license.php).

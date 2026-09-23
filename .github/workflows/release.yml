@@ -24,36 +24,23 @@ jobs:
         run: |
           latest=$(git tag -l '${{ matrix.module }}/v*' --sort=-v:refname | head -n 1)
           echo "tag=${latest}" >> "$GITHUB_OUTPUT"
-          echo "version=${latest#${{ matrix.module }}/v}" >> "$GITHUB_OUTPUT"
 
-      - name: Check for changes
-        id: changes
+      # The level comes from Release-As trailers and conventional-commit
+      # markers on the commits that touched this module; see
+      # .github/scripts/next-version.sh and its test for the rules.
+      - name: Determine next version
+        id: version
         run: |
-          tag="${{ steps.latest_tag.outputs.tag }}"
-          if [ -z "$tag" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --quiet "${tag}..HEAD" -- ${{ matrix.module }}/; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          next=$(.github/scripts/next-version.sh "${{ matrix.module }}")
+          if [ "$next" = "skip" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "new_tag=${next}" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Bump version
-        if: steps.changes.outputs.changed == 'true'
-        id: bump
-        run: |
-          current="${{ steps.latest_tag.outputs.version }}"
-          if [ -z "$current" ]; then
-            new_tag="${{ matrix.module }}/v0.1.0"
-          else
-            IFS='.' read -r major minor patch <<< "$current"
-            patch=$((patch + 1))
-            new_tag="${{ matrix.module }}/v${major}.${minor}.${patch}"
-          fi
-          echo "new_tag=${new_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.version.outputs.skip != 'true'
         id: notes
         run: |
           prev_tag="${{ steps.latest_tag.outputs.tag }}"
@@ -69,15 +56,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create tag and release
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.version.outputs.skip != 'true'
         run: |
-          git tag "${{ steps.bump.outputs.new_tag }}"
-          git push origin "${{ steps.bump.outputs.new_tag }}"
+          git tag "${{ steps.version.outputs.new_tag }}"
+          git push origin "${{ steps.version.outputs.new_tag }}"
 
       - name: Create GitHub release
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.bump.outputs.new_tag }}
-          name: ${{ steps.bump.outputs.new_tag }}
+          tag_name: ${{ steps.version.outputs.new_tag }}
+          name: ${{ steps.version.outputs.new_tag }}
           body: ${{ steps.notes.outputs.notes }}
