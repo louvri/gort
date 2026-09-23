@@ -1,3 +1,6 @@
+// Package common provides framework-agnostic helpers for JWT minting and
+// verification, bearer token extraction, and timezone parsing shared by the
+// gort echo and gin middleware.
 package common
 
 import (
@@ -11,14 +14,24 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// ErrEmptyHMACKey is returned instead of signing or verifying with an empty
+// HMAC key, which would let anyone forge tokens. It indicates a misconfigured
+// secret rather than a bad token, so callers can tell the two apart with
+// errors.Is.
+var ErrEmptyHMACKey = errors.New("empty HMAC key")
+
 // GenerateAuthToken mints an HS256-signed JWT for sub, verifiable via
 // JWTKeyFunc(jwtKey, true). The variadic data is stored under the "data" claim:
 // zero args yield a nil claim (JSON null), and one or more args yield a []any,
 // so a single value still arrives as a one-element slice (consumers must
 // type-assert to []any and index). jwtLifetimeInMinute sets exp relative to
 // iat; values <= 0 mint an already-expired token (intended for tests, not
-// production callers).
+// production callers). An empty jwtKey is rejected.
 func GenerateAuthToken(sub, jwtKey string, jwtLifetimeInMinute int, data ...any) (string, error) {
+	if jwtKey == "" {
+		return "", ErrEmptyHMACKey
+	}
+
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":  sub,
@@ -63,10 +76,13 @@ func GenerateAuthTokenAsym(sub, jwtPrivKey string, jwtLifetimeInMinute int, data
 	return tokenString, nil
 }
 
+// GetAuthorizationHeaderValue returns the raw Authorization header of r.
 func GetAuthorizationHeaderValue(r *http.Request) string {
 	return r.Header.Get("Authorization")
 }
 
+// GetBearerToken returns the token from a "Bearer <token>" Authorization
+// header, or "" when the header is missing or uses another scheme.
 func GetBearerToken(r *http.Request) string {
 	token, found := strings.CutPrefix(GetAuthorizationHeaderValue(r), "Bearer ")
 	if !found {
@@ -75,11 +91,19 @@ func GetBearerToken(r *http.Request) string {
 	return token
 }
 
+// JWTKeyFunc returns a jwt.Keyfunc that pins the signing algorithm family to
+// the key type, preventing algorithm-confusion attacks: symmetric expects
+// HMAC and uses key as the shared secret; otherwise it expects RSA and parses
+// key as a PEM-encoded public key. An empty HMAC key is rejected, since HMAC
+// would otherwise verify tokens anyone can sign with that same empty key.
 func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 	return func(token *jwt.Token) (any, error) {
 		if symmetric {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			if key == "" {
+				return nil, ErrEmptyHMACKey
 			}
 			return []byte(key), nil
 		}
@@ -95,6 +119,9 @@ func JWTKeyFunc(key string, symmetric bool) jwt.Keyfunc {
 	}
 }
 
+// GetMapClaimsFromJWT verifies bearerToken's signature using
+// JWTKeyFunc(key, symmetric), rejects it if its exp or nbf claim (when
+// present) is out of range, and returns its claims.
 func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(bearerToken, JWTKeyFunc(key, symmetric))
 	if err != nil {
@@ -109,6 +136,10 @@ func GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims
 	return nil, errors.New("claim type is not map")
 }
 
+// GetMapClaimsFromJWTWithoutValidation decodes bearerToken's claims WITHOUT
+// verifying its signature or expiry, so the result must never be used for
+// authentication or authorization. It returns nil if the token is malformed
+// or has no claims.
 func GetMapClaimsFromJWTWithoutValidation(bearerToken string) jwt.MapClaims {
 	parser := jwt.NewParser()
 	claims := jwt.MapClaims{}

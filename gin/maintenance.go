@@ -7,6 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ProbeMaintenanceMiddleware rejects every request with statusCode and
+// errorMessage while enabled, except those whose URL path starts with one of
+// skippedPaths.
 func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, statusCode int, enabled bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !enabled {
@@ -24,6 +27,9 @@ func ProbeMaintenanceMiddleware(skippedPaths []string, errorMessage string, stat
 	}
 }
 
+// ScheduledMaintenanceMiddleware behaves like ProbeMaintenanceMiddleware while
+// the current time is within [from, to]. A zero from starts the window
+// immediately, a zero to leaves it open-ended, and both zero disables it.
 func ScheduledMaintenanceMiddleware(skippedPaths []string, errorMessage string, statusCode int, from, to time.Time) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		now := time.Now()

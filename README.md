@@ -6,11 +6,11 @@ Each submodule is independently importable so you only pull in the dependencies 
 
 ## Modules
 
-| Module | Install | Description |
-|--------|---------|-------------|
-| [common](./common) | `go get github.com/louvri/gort/common` | Framework-agnostic JWT parsing, bearer token extraction, and timezone utilities |
-| [echo](./echo) | `go get github.com/louvri/gort/echo` | Authentication and maintenance middleware for [Echo](https://github.com/labstack/echo) |
-| [gin](./gin) | `go get github.com/louvri/gort/gin` | Authentication and maintenance middleware for [Gin](https://github.com/gin-gonic/gin) |
+| Module | Install | Go | Description |
+|--------|---------|----|-------------|
+| [common](./common) | `go get github.com/louvri/gort/common` | 1.25+ | Framework-agnostic JWT parsing, bearer token extraction, and timezone utilities |
+| [echo](./echo) | `go get github.com/louvri/gort/echo` | 1.26+ | Authentication and maintenance middleware for [Echo](https://github.com/labstack/echo) |
+| [gin](./gin) | `go get github.com/louvri/gort/gin` | 1.26+ | Authentication and maintenance middleware for [Gin](https://github.com/gin-gonic/gin) |
 
 ## Quick Start
 
@@ -67,6 +67,17 @@ func main() {
 ```
 
 See each submodule's README for detailed API documentation.
+
+## Releasing
+
+Merging to `main` tags a release, `<module>/vX.Y.Z`, of every module the merge changed. The level comes from the commits touching that module since its last tag:
+
+- A `Release-As: major|minor|patch` trailer on its own line sets it explicitly. A commit marked `Release-As: skip` (on a merge commit: the whole merged branch) never triggers a release by itself; its changes ship with the module's next change.
+- Otherwise a breaking change (a `type!:` subject or a `BREAKING CHANGE:` footer) is a minor bump below v1.0.0 and a major one from then on; from v1.0.0 a `feat:` subject is a minor bump; everything else is a patch.
+- Merges are squashed, so a pull request's trailers and markers apply to every module it touches.
+- A module's first release is v0.1.0. From v2 on, its `go.mod` must declare the matching `/vN` module path, or the release is refused.
+
+The rules are pinned by `.github/scripts/next-version_test.sh`.
 
 ## License
 

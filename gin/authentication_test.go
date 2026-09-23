@@ -56,6 +56,17 @@ func TestJWTAuthValidatorMiddleware(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), errMsg)
 	})
 
+	t.Run("empty key rejects token signed with empty key", func(t *testing.T) {
+		e := setupGinJWT("", errMsg, true, false)
+		token := signToken(jwt.MapClaims{"sub": "123", "exp": time.Now().Add(time.Hour).Unix()}, "")
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
 	t.Run("expired token", func(t *testing.T) {
 		e := setupGinJWT(key, errMsg, true, false)
 		token := signToken(jwt.MapClaims{
@@ -179,4 +190,39 @@ func TestServerKeyAuthValidatorMiddleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
+}
+
+func TestServerKeyAuthValidatorMiddlewareEmptyKeys(t *testing.T) {
+	tests := []struct {
+		name              string
+		serverKey         string
+		expiringServerKey string
+		header            *string
+		wantCode          int
+	}{
+		{"no expiring key, missing header", "primary-key", "", nil, http.StatusUnauthorized},
+		{"no expiring key, wrong key", "primary-key", "", new("wrong-key"), http.StatusUnauthorized},
+		{"no expiring key, primary key", "primary-key", "", new("primary-key"), http.StatusOK},
+		{"no primary key, missing header", "", "expiring-key", nil, http.StatusUnauthorized},
+		{"no primary key, wrong key", "", "expiring-key", new("primary-key"), http.StatusUnauthorized},
+		{"no primary key, expiring key", "", "expiring-key", new("expiring-key"), http.StatusOK},
+		{"no keys, missing header", "", "", nil, http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := gin.New()
+			e.Use(ServerKeyAuthValidatorMiddleware("X-Server-Token", tt.serverKey, tt.expiringServerKey, "Invalid token/session"))
+			e.GET("/", func(c *gin.Context) {
+				c.String(http.StatusOK, "Hello World")
+			})
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.header != nil {
+				req.Header.Set("X-Server-Token", *tt.header)
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantCode, rec.Code)
+		})
+	}
 }

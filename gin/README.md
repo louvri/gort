@@ -8,6 +8,8 @@ Authentication and maintenance middleware for the [Gin](https://github.com/gin-g
 go get github.com/louvri/gort/gin
 ```
 
+Requires Go 1.26 or later.
+
 ## Middleware
 
 ### `JWTAuthValidatorMiddleware`
@@ -18,7 +20,7 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric,
 
 Validates JWT bearer tokens on incoming requests. Returns `401 Unauthorized` if the token is missing, expired, or invalid.
 
-- `key` — signing key (shared secret for HMAC, PEM public key for RSA)
+- `key` — signing key (shared secret for HMAC, PEM public key for RSA); an empty HMAC key rejects every token
 - `unauthorizedErrorMessage` — message returned to the client on auth failure
 - `symmetric` — `true` for HMAC, `false` for RSA
 - `logErrorMessage` — `true` to log detailed errors to stdout
@@ -42,8 +44,10 @@ Validates requests using a static API key in a custom header. Supports key rotat
 
 - `headerKey` — header name to read the key from
 - `serverKey` — primary API key
-- `expiringServerKey` — secondary key for rotation (both are accepted)
+- `expiringServerKey` — secondary key for rotation (both are accepted); pass `""` when not rotating
 - `unauthorizedErrorMessage` — message returned on auth failure
+
+An empty key never matches, so a request without the header is always rejected.
 
 ```go
 // Internal routes with server key auth

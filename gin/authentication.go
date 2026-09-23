@@ -1,7 +1,8 @@
+// Package gin provides authentication and maintenance-mode middleware for
+// the Gin web framework.
 package gin
 
 import (
-	"crypto/subtle"
 	"log/slog"
 	"net/http"
 
@@ -9,6 +10,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// JWTAuthValidatorMiddleware rejects requests without a valid "Bearer" JWT
+// with 401 and unauthorizedErrorMessage. The signing algorithm is pinned to
+// the key type: symmetric expects HMAC with key as the shared secret;
+// otherwise it expects RSA with key as a PEM-encoded public key. An empty
+// HMAC key rejects every token. logErrorMessage logs token verification
+// failures; an unparseable RSA key is logged regardless.
 func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric, logErrorMessage bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bearerToken := getBearerToken(c.Request)
@@ -37,11 +44,15 @@ func JWTAuthValidatorMiddleware(key, unauthorizedErrorMessage string, symmetric,
 	}
 }
 
+// ServerKeyAuthValidatorMiddleware admits requests whose headerKey header
+// equals serverKey or expiringServerKey (the latter supports key rotation),
+// compared in constant time; others get 401 with unauthorizedErrorMessage.
+// An empty serverKey or expiringServerKey never matches, so the rotation slot
+// can be left "" when unused.
 func ServerKeyAuthValidatorMiddleware(headerKey, serverKey, expiringServerKey, unauthorizedErrorMessage string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		headerValue := c.Request.Header.Get(headerKey)
-		if subtle.ConstantTimeCompare([]byte(headerValue), []byte(serverKey)) == 1 ||
-			subtle.ConstantTimeCompare([]byte(headerValue), []byte(expiringServerKey)) == 1 {
+		if matchesServerKey(headerValue, serverKey) || matchesServerKey(headerValue, expiringServerKey) {
 			c.Next()
 			return
 		}

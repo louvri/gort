@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// ParseTimeWithFallback parses sourceTime in location using format, retrying
+// with backupFormat on failure. It returns the zero time if both fail.
 func ParseTimeWithFallback(sourceTime, format, backupFormat string, location *time.Location) time.Time {
 	result, err := time.ParseInLocation(format, sourceTime, location)
 	if err != nil {
@@ -15,14 +17,21 @@ func ParseTimeWithFallback(sourceTime, format, backupFormat string, location *ti
 	return result
 }
 
+// ParseUTCTime parses sourceTime as UTC in either "2006-01-02 15:04:05" or
+// "2006-01-02T15:04:05Z" form, returning the zero time if neither matches.
 func ParseUTCTime(sourceTime string) time.Time {
 	return ParseTimeWithFallback(sourceTime, "2006-01-02 15:04:05", "2006-01-02T15:04:05Z", time.UTC)
 }
 
+// ExtractTimeZoneTextFromHeader returns the raw Timezone header of r.
 func ExtractTimeZoneTextFromHeader(r *http.Request) string {
 	return r.Header.Get("Timezone")
 }
 
+// ExtractTimeZoneLocationFromHeader returns a fixed zone named after the
+// Timezone header with the offset from ExtractTimeZoneInSecondsFromHeader, or
+// time.UTC when the header is absent. An unparseable header yields a zone with
+// that name and a zero offset.
 func ExtractTimeZoneLocationFromHeader(r *http.Request) *time.Location {
 	name := ExtractTimeZoneTextFromHeader(r)
 	offset := ExtractTimeZoneInSecondsFromHeader(r)
@@ -32,6 +41,12 @@ func ExtractTimeZoneLocationFromHeader(r *http.Request) *time.Location {
 	return time.FixedZone(name, offset)
 }
 
+// ExtractTimeZoneInSecondsFromHeader parses the Timezone header as a UTC
+// offset in seconds. Every "GMT" and "UTC" (case-insensitive) is removed, and
+// the remainder is read as hours when shorter than four characters ("+7",
+// "-05") and as HHMM otherwise ("+0530"). It returns 0 when the header is
+// missing, the remainder is shorter than two characters, or it is not an
+// integer.
 func ExtractTimeZoneInSecondsFromHeader(r *http.Request) int {
 	timezone := strings.ToUpper(ExtractTimeZoneTextFromHeader(r))
 	timezone = strings.ReplaceAll(strings.ReplaceAll(timezone, "GMT", ""), "UTC", "")

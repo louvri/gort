@@ -8,6 +8,8 @@ Framework-agnostic utilities for JWT handling, bearer token extraction, and time
 go get github.com/louvri/gort/common
 ```
 
+Requires Go 1.25 or later.
+
 ## API
 
 ### Authentication
@@ -24,7 +26,7 @@ Extracts and returns the token from a `Bearer <token>` authorization header. Ret
 
 Returns a `jwt.Keyfunc` for use with `jwt.Parse`. Validates that the signing algorithm matches the key type (HMAC for symmetric, RSA for asymmetric) to prevent algorithm confusion attacks.
 
-- `symmetric=true` — expects HMAC-signed tokens, uses `key` as the shared secret
+- `symmetric=true` — expects HMAC-signed tokens, uses `key` as the shared secret; an empty `key` is rejected with `ErrEmptyHMACKey`
 - `symmetric=false` — expects RSA-signed tokens, parses `key` as a PEM-encoded RSA public key
 
 #### `GetMapClaimsFromJWT(key, bearerToken string, symmetric bool) (jwt.MapClaims, error)`
