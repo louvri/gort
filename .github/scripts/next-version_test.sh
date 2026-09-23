@@ -398,6 +398,250 @@ Notes:
 * feat!: was considered but not done"
 expect "bullets in an ordinary commit body are inert" mod/v1.0.1
 
+# --- each change is classified on its own (#17) -----------------------------
+# A trailer sets the level of its own change only; the release takes the
+# highest level across the range, so a patch trailer cannot mask a breaking
+# change elsewhere.
+repo c1 mod/v0.2.3; commit "feat!: drop Foo"; commit "docs: x
+
+Release-As: patch"
+expect "a patch trailer does not mask another commit's breaking change" mod/v0.3.0
+
+repo c2 mod/v1.2.3; mkdir mod; echo "module example.com/mod/v2" > mod/go.mod
+commit "feat!: drop Foo"; commit "docs: x
+
+Release-As: patch"
+expect "nor at v1.x, where it would publish a major change as a patch" mod/v2.0.0
+
+# Every squash in the range contributes its own body bullets.
+repo c3 mod/v0.2.3
+commit "Generated title (#1)
+
+* feat!: remove X"
+commit "fix: y (#2)"
+expect "bullets of a squash are read when the range holds several" mod/v0.3.0
+
+# A squash is one change: the text cannot tell a skip meant for its last
+# squashed commit from one meant for the whole pull request, so a skip
+# anywhere in it skips the pull request.
+repo c4 mod/v0.2.3; commit "Fix login bug (#3)
+
+* fix: the login bug
+
+* ci: tweak workflow
+
+Release-As: skip"
+expect "a skip in a squash body skips the whole squash" skip
+
+repo c4b mod/v0.2.3; commit "Update deps (#10)
+
+* chore: a
+
+* chore: b
+
+Release-As: skip"
+expect "a squash of several commits can be skipped as a whole" skip
+
+repo c5 mod/v0.2.3; commit "feat!: rework (#4)
+
+* ci: tweak workflow
+
+Release-As: skip"
+expect "a squash whose every commit skips stays skipped, whatever its title" skip
+
+repo c6 mod/v0.2.3; commit "Rework the API (#5)
+
+* fix: a
+
+* refactor!: b"
+expect "the squash title needs no marker of its own" mod/v0.3.0
+
+# A merge commit's subject is read for markers, like its body.
+repo c7 mod/v0.2.3
+git checkout -q -b feature
+commit "chore: x"
+git checkout -q -
+git merge -q --no-ff -m "feat!: drop the old API" feature
+expect "a breaking merge title counts" mod/v0.3.0
+
+# Trailer keys are case-insensitive, as in git.
+repo c8 mod/v0.2.3; commit "docs: x
+
+release-as: major"
+expect "a lower-case trailer key is read" mod/v1.0.0
+
+repo c9 mod/v0.2.3; commit "docs: x
+
+RELEASE-AS: Minor"
+expect "and so is an upper-case key with a capitalised level" mod/v0.3.0
+
+repo c10 mod/v0.2.3; commit "ci: x
+
+release-as: SKIP"
+expect "and a case-varied skip" skip
+
+# A change reverted before its release leaves the module as it was tagged.
+repo c11 mod/v0.2.3; commit "feat!: x"; git revert --no-edit HEAD >/dev/null
+expect "a change reverted before its release publishes nothing" skip
+# Once something else changes, the reverted breaking change still counts:
+# revert lines are not trusted (any message can carry one), and a bump too
+# large is the safe mistake - a trailer or a hand-pushed tag corrects it.
+commit "fix: y"
+expect "a later change releases conservatively, reverted marker included" mod/v0.3.0
+
+repo c11b mod/v0.2.3; commit "feat!: x"
+git revert --no-edit HEAD >/dev/null; git revert --no-edit HEAD >/dev/null
+expect "a revert of a revert keeps the reapplied breaking change" mod/v0.3.0
+
+repo c11c mod/v0.2.3; commit "feat!: breaking api"
+commit "docs: x
+
+This reverts commit $(git rev-parse HEAD)."
+expect "a pasted revert line does not drop another commit" mod/v0.3.0
+
+# After the /vN refusal, a hand-pushed tag is the documented way out: the
+# next run starts from it.
+repo c12 mod/v1.2.3; commit "feat!: an accidental breaking marker"
+expect "the v2 refusal" "<script failed>"
+git tag mod/v1.3.0
+commit "fix: after the hand-pushed tag"
+expect "a hand-pushed tag unblocks the module" mod/v1.3.1
+
+# Only a mainline merge's skip covers the branch it merged: a skip on a merge
+# inside a pull request's own branch must not swallow commits it did not
+# introduce - here, a fix already on main.
+repo c13 mod/v0.2.3
+trunk=$(git symbolic-ref --short HEAD)
+commit "fix: a fix on main"
+git checkout -q -b feature mod/v0.2.3
+commit "docs: branch work" other
+git merge -q --no-ff -m "Merge main into feature
+
+Release-As: skip" "$trunk"
+git checkout -q "$trunk"
+git merge -q --no-ff -m "Merge pull request #7 from feature" feature
+expect "a skip on a merge inside a branch does not cover the mainline" mod/v0.2.4
+
+# A mainline merge that changes the module itself - a conflict resolution -
+# is a change of its own.
+repo c14 mod/v0.2.3
+git checkout -q -b feature
+commit "docs: branch work" other
+git checkout -q -
+git merge -q --no-ff --no-commit feature
+change
+git commit -q -m "Merge pull request #8 from feature"
+if ! git rev-parse -q --verify HEAD^2 >/dev/null; then
+  printf 'FAIL c14 setup did not record a merge\n'
+  failures=$((failures + 1))
+fi
+expect "a merge that changes the module by itself releases" mod/v0.2.4
+
+# Markers on a merge inside a pull request's branch still count.
+repo c15 mod/v0.2.3
+trunk=$(git symbolic-ref --short HEAD)
+git checkout -q -b g
+commit "chore: g work"
+git checkout -q -b f "$trunk"
+commit "chore: f work" other
+git merge -q --no-ff -m "Merge g
+
+BREAKING CHANGE: removes Foo" g
+git checkout -q "$trunk"
+git merge -q --no-ff -m "Merge pull request #9 from f" f
+expect "a breaking footer on a merge inside a branch counts" mod/v0.3.0
+
+# A single-commit squash keeps the commit's own body, which may be a list.
+repo c16 mod/v0.2.3; commit "fix: y (#9)
+
+* one
+* two
+
+Release-As: skip"
+expect "a list in a single-commit squash does not hide its skip" skip
+
+# A mainline merge's skip covers everything its branch brought in, including
+# what merges inside that branch say.
+repo c17 mod/v0.2.3
+trunk=$(git symbolic-ref --short HEAD)
+git checkout -q -b g
+commit "chore: g work"
+git checkout -q -b f "$trunk"
+commit "chore: f work" other
+git merge -q --no-ff -m "Merge g
+
+BREAKING CHANGE: x" g
+git checkout -q "$trunk"
+git merge -q --no-ff -m "Merge pull request #9 from f
+
+Release-As: skip" f
+expect "a mainline skip covers merges nested in its branch" skip
+
+# A merge's own edit to the module is a change even when every commit its
+# branch brought in is skipped.
+repo c18 mod/v0.2.3
+git checkout -q -b fb
+commit "chore: x
+
+Release-As: skip"
+git checkout -q -
+git merge -q --no-ff --no-commit fb
+change
+git commit -q -m "Merge pull request #3 from fb"
+expect "a merge's own edit releases though its branch skipped" mod/v0.2.4
+
+# A conflict resolved in another module is not a change to this one.
+repo c19 mod/v0.2.3
+git checkout -q -b fb
+change; change other
+git commit -q -m "chore: x
+
+Release-As: skip"
+git checkout -q -
+change other
+git commit -q -m "docs: main edits other"
+git merge -q --no-ff -m "Merge pull request #11 from fb" fb >/dev/null 2>&1 || true
+echo resolved > other/file
+git add other/file
+git commit -q --no-edit -m "Merge pull request #11 from fb"
+expect "a conflict elsewhere does not release this module" skip
+
+# A skip defers a release; it does not erase the level the change needs.
+repo c20 mod/v0.2.3; commit "Rework (#4)
+
+* feat!: remove X
+
+* ci: tweak workflow
+
+Release-As: skip"
+expect "a skipped breaking change" skip
+commit "fix: y"
+expect "ships with the next change at the level it needs" mod/v0.3.0
+
+repo c21 mod/v1.4.0
+git checkout -q -b pr
+commit "refactor!: drop Foo"
+git checkout -q -
+git merge -q --no-ff -m "Merge pull request #5 from pr
+
+Release-As: skip" pr
+expect "a skipped branch" skip
+mkdir -p mod; echo "module example.com/mod/v2" > mod/go.mod; git add mod/go.mod
+commit "fix: typo"
+expect "carries its breaking change into the next release" mod/v2.0.0
+
+# An octopus merge's skip covers every branch it merged.
+repo c22 mod/v0.2.3
+trunk=$(git symbolic-ref --short HEAD)
+git checkout -q -b a; commit "fix: a" other
+git checkout -q -b b mod/v0.2.3; commit "fix: b" other2
+git checkout -q -b c mod/v0.2.3; commit "fix: c"
+git checkout -q "$trunk"
+git merge -q --no-ff -m "Merge a, b and c
+
+Release-As: skip" a b c
+expect "an octopus merge's skip covers its third branch" skip
+
 # --- base tag for release notes ---------------------------------------------
 expect_base() {
   local description="$1" want="$2" module="${3-mod}" got
