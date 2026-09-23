@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.27.x"
 
       - name: Tidy
         working-directory: ${{ matrix.module }}
@@ -48,7 +48,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.27.x"
 
       - name: Build
         working-directory: ${{ matrix.module }}
@@ -65,7 +65,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.0"
+          go-version: "1.27.x"
 
       - name: Test
         working-directory: ${{ matrix.module }}
