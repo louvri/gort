@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 # Each run derives its tags from the commits since the last ones, so two runs
 # must not compute from the same base. A running release is never cancelled;
@@ -16,68 +16,136 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Release (${{ matrix.module }})
+  # Computes each module's next version and tests every module about to be
+  # released, on its floor (the go directive in its go.mod) and on the newest
+  # Go: a tag on the module proxy cannot be withdrawn. It runs with a
+  # read-only token in a job of its own, so nothing the tests or their
+  # dependencies do - to the environment, PATH or the runner - can reach the
+  # release job's write token.
+  prepare:
+    name: Prepare (${{ matrix.module }})
     runs-on: ubuntu-latest
     strategy:
-      # One module refusing to release (see next-version.sh) must not cancel
-      # another between pushing its tag and creating its release.
       fail-fast: false
       matrix:
         module: [common, echo, gin]
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: "off"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # The tag next-version.sh bumps from, so the release notes cover exactly
-      # the commits the new version was computed from.
-      - name: Get latest module tag
-        id: latest_tag
-        run: |
-          latest=$(.github/scripts/next-version.sh --base "${{ matrix.module }}")
-          echo "tag=${latest}" >> "$GITHUB_OUTPUT"
+          persist-credentials: false
 
       # The level comes from Release-As trailers and conventional-commit
-      # markers on the commits that touched this module; see
+      # markers on the changes that touched this module; see
       # .github/scripts/next-version.sh and its test for the rules.
       - name: Determine next version
         id: version
+        env:
+          MODULE: ${{ matrix.module }}
+          MAINLINE_REF: origin/main
         run: |
           set -euo pipefail
-          next=$(.github/scripts/next-version.sh "${{ matrix.module }}")
+          next=$(.github/scripts/next-version.sh "$MODULE")
+          if [ "$next" = "skip" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.version.outputs.skip != 'true'
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+
+      - name: Test on the floor
+        if: steps.version.outputs.skip != 'true'
+        working-directory: ${{ matrix.module }}
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./... -race -count=1
+
+      - uses: actions/setup-go@v5
+        if: steps.version.outputs.skip != 'true'
+        with:
+          go-version: "1.27.x"
+
+      - name: Test on the newest Go
+        if: steps.version.outputs.skip != 'true'
+        working-directory: ${{ matrix.module }}
+        run: go test ./... -race -count=1
+
+  # Runs on a fresh runner once every prepare job has passed - a job cannot
+  # wait on a single matrix cell, so a module failing its tests holds back the
+  # run's releases, which fails closed. It recomputes the version, which the
+  # same script gives again on the same commit (runs are serialized), and runs
+  # nothing but that script, git and gh.
+  release:
+    name: Release (${{ matrix.module }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      # One module refusing to release must not cancel the others.
+      fail-fast: false
+      matrix:
+        module: [common, echo, gin]
+    steps:
+      # No git push happens here - gh uses GH_TOKEN, which only the create
+      # step sees - so the token is not stored in the git config.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine next version
+        id: version
+        env:
+          MODULE: ${{ matrix.module }}
+          MAINLINE_REF: origin/main
+        run: |
+          set -euo pipefail
+          base=$(.github/scripts/next-version.sh --base "$MODULE")
+          next=$(.github/scripts/next-version.sh "$MODULE")
+          echo "base=${base}" >> "$GITHUB_OUTPUT"
           if [ "$next" = "skip" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "new_tag=${next}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate release notes
-        if: steps.version.outputs.skip != 'true'
-        id: notes
-        run: |
-          prev_tag="${{ steps.latest_tag.outputs.tag }}"
-          if [ -n "$prev_tag" ] && git rev-parse "$prev_tag" >/dev/null 2>&1; then
-            log=$(git log "${prev_tag}..HEAD" --pretty=format:"- %s (%h)" --no-merges -- ${{ matrix.module }}/)
-          else
-            log=$(git log --pretty=format:"- %s (%h)" --no-merges -- ${{ matrix.module }}/)
-          fi
-          {
-            echo "notes<<EOF"
-            echo "$log"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
+      # One call creates the tag and the release, so a failure leaves neither
+      # and a re-run retries both; a tag pushed on its own would make the
+      # re-run see an unchanged module and never create the release. Notes
+      # list this module's commits since its newest release tag reachable
+      # from this commit.
       - name: Create tag and release
         if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODULE: ${{ matrix.module }}
+          NEW_TAG: ${{ steps.version.outputs.new_tag }}
+          BASE_TAG: ${{ steps.version.outputs.base }}
         run: |
-          git tag "${{ steps.version.outputs.new_tag }}"
-          git push origin "${{ steps.version.outputs.new_tag }}"
-
-      - name: Create GitHub release
-        if: steps.version.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.new_tag }}
-          name: ${{ steps.version.outputs.new_tag }}
-          body: ${{ steps.notes.outputs.notes }}
+          set -euo pipefail
+          # The version goes past every tag this clone has, but one pushed
+          # to the remote since checkout would make gh attach the release to
+          # it and ignore --target. Only a 404 means the tag is absent; any
+          # other failure fails the step.
+          status=0
+          out=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${NEW_TAG}" 2>&1) || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "::error::${NEW_TAG} already exists on the remote; refusing to release on it." >&2
+            exit 1
+          elif ! grep -q "HTTP 404" <<< "$out"; then
+            echo "::error::could not check whether ${NEW_TAG} exists: ${out}" >&2
+            exit 1
+          fi
+          range=HEAD
+          if [ -n "$BASE_TAG" ]; then
+            range="${BASE_TAG}..HEAD"
+          fi
+          git log "$range" --pretty=format:"- %s (%h)" --no-merges -- "${MODULE}/" > "$RUNNER_TEMP/notes.md"
+          gh release create "$NEW_TAG" --target "$GITHUB_SHA" --title "$NEW_TAG" --notes-file "$RUNNER_TEMP/notes.md"
