@@ -77,7 +77,7 @@ Merging to `main` tags a release, `<module>/vX.Y.Z`, of every module the merge c
 - A squash merge is one change: the `* subject` lines of its body count as subjects, and a `Release-As:` trailer anywhere in it applies to the whole pull request. Pull requests are squashed, so each one touching a module is a single change to it.
 - A merge commit counts on its own subject and body, and one that changes the module itself (a hand-resolved conflict) asks for at least a patch.
 - A module whose code is unchanged since its tag is not released, whatever its commits ask for. Once something else changes, a reverted change still counts: revert lines are not trusted, and a bump too large is the safe mistake.
-- A module's first release is v0.1.0. From v2 on, its `go.mod` must declare the matching `/vN` module path, or the release is refused; if that major bump was not intended, tag the current `main` commit by hand with the version you want and later runs start from it (a tag on a commit that is not on `main` is ignored as a base, though its version number is still skipped past).
+- A module's first release is v0.1.0. From v2 on, its `go.mod` must declare the matching `/vN` module path, or the release is refused; if that major bump was not intended, tag the current `main` commit by hand with the version you want and later runs start from it (a tag on a commit that is not on `main` is ignored as a base, though its version number is still skipped past - so a `v1.x` tag pushed by hand off `main` moves a module past 1.0, after which a `feat:` is a minor bump and a breaking change a major one, refused until `go.mod` declares the `/v2` path).
 
 The rules are pinned by `.github/scripts/next-version_test.sh` (needs git 2.38 or later).
 

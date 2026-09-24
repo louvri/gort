@@ -56,6 +56,20 @@ expect() {
   fi
 }
 
+# expect_stderr DESCRIPTION LINE - run the script for mod and check that LINE
+# is one of the lines on its stderr.
+expect_stderr() {
+  local description="$1" want="$2" stderr
+  total=$((total + 1))
+  stderr=$("$script" mod 2>&1 >/dev/null) || true
+  if grep -qxF -- "$want" <<< "$stderr"; then
+    printf 'ok   %s\n' "$description"
+  else
+    printf 'FAIL %s\n       want %s\n       got  %s\n' "$description" "$want" "$stderr"
+    failures=$((failures + 1))
+  fi
+}
+
 # --- level from the conventional-commit subject -----------------------------
 repo a mod/v0.0.5; commit "fix: a bug"
 expect "fix below v1.0.0 -> patch" mod/v0.0.6
@@ -657,14 +671,15 @@ expect "a trailer that lowers its own change's marker is honoured" mod/v0.2.4
 PATH="$workdir/badsed:$PATH" expect "a tool failing while reading trailers fails the step" "<script failed>"
 
 # Lowering a change below its own marker is allowed, but said out loud.
-total=$((total + 1))
-stderr=$("$script" mod 2>&1 >/dev/null) || true
-if grep -q "ranks below its own" <<< "$stderr"; then
-  printf 'ok   %s\n' "a trailer lowering its own marker is reported"
-else
-  printf 'FAIL %s\n' "a trailer lowering its own marker is reported"
-  failures=$((failures + 1))
-fi
+expect_stderr "a trailer lowering its own marker is reported" \
+  "Release-As on 'feat!: x' ranks below its own breaking or feature marker; releasing at the lower level it asks for."
+
+# A MAINLINE_REF that does not resolve is a broken setup: every run fails
+# and names it, rather than only the rare run that could be stale.
+repo c31 mod/v0.2.3; commit "fix: x"
+MAINLINE_REF=origin/missing expect "an unresolvable MAINLINE_REF fails the run" "<script failed>"
+MAINLINE_REF=origin/missing expect_stderr "and names the ref" \
+  "MAINLINE_REF origin/missing does not resolve; refusing to release."
 
 # --- base tag for release notes ---------------------------------------------
 expect_base() {
@@ -708,14 +723,7 @@ printf '#!/bin/sh\ncase "$1 $2" in "diff --quiet") echo "git diff exploded" >&2;
 chmod +x "$workdir/badgit/git"
 repo c25 mod/v0.2.3; commit "fix: x"
 PATH="$workdir/badgit:$PATH" expect "a failing git diff fails the step" "<script failed>"
-total=$((total + 1))
-stderr=$(PATH="$workdir/badgit:$PATH" "$script" mod 2>&1 >/dev/null) || true
-if grep -q "git diff .* failed" <<< "$stderr"; then
-  printf 'ok   %s\n' "and it is the diff that fails it"
-else
-  printf 'FAIL %s\n       stderr %s\n' "and it is the diff that fails it" "$stderr"
-  failures=$((failures + 1))
-fi
+PATH="$workdir/badgit:$PATH" expect_stderr "and it is the diff that fails it" "git diff mod/v0.2.3 HEAD failed"
 
 # A run on a commit that a later tag already covers is stale - a re-run of an
 # old, failed release - and must not publish a higher version on older code.
@@ -782,25 +790,12 @@ git tag mod/v0.4.0
 git checkout -q "$trunk"
 commit "fix: first"
 expect "a first release goes past a stray tag" mod/v0.4.1
-total=$((total + 1))
-stderr=$("$script" mod 2>&1 >/dev/null) || true
-if grep -q "Bumping mod/v0.4.0 (newest mod tag; changes counted from mod/v0.0.0)" <<< "$stderr"; then
-  printf 'ok   %s\n' "and the log names the stray it bumped from"
-else
-  printf 'FAIL %s\n       stderr %s\n' "and the log names the stray it bumped from" "$stderr"
-  failures=$((failures + 1))
-fi
+expect_stderr "and the log names the stray it bumped from" \
+  "Bumping mod/v0.4.0 (newest mod tag; changes counted from mod/v0.0.0) -> mod/v0.4.1 (patch)"
 
 # A plain first release logs no stray.
 repo c30; commit "fix: first"
-total=$((total + 1))
-stderr=$("$script" mod 2>&1 >/dev/null) || true
-if grep -qx "Bumping mod/v0.0.0 -> mod/v0.1.0 (patch)" <<< "$stderr"; then
-  printf 'ok   %s\n' "a first release logs no stray tag"
-else
-  printf 'FAIL %s\n       stderr %s\n' "a first release logs no stray tag" "$stderr"
-  failures=$((failures + 1))
-fi
+expect_stderr "a first release logs no stray tag, and the level it applied" "Bumping mod/v0.0.0 -> mod/v0.1.0 (minor)"
 
 # ----------------------------------------------------------------------------
 cd /
