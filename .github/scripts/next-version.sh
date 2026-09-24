@@ -77,8 +77,10 @@ fi
 # - on a mainline commit after HEAD: a later run already released past this
 #   one, and this run - a re-run of an old, failed release, say - is stale;
 #   publishing would put a higher version on older code, so it releases
-#   nothing. The mainline is MAINLINE_REF (the release workflow passes
-#   origin/main); without it, no run is taken for stale
+#   nothing. The mainline is MAINLINE_REF, which the release workflow fetches
+#   itself; without it, no run is taken for stale, and one that does not
+#   resolve fails every run - a broken setup should not wait for a rare tag
+#   layout to show
 # - anywhere else: a tag pushed by hand off the mainline. It is no base, but
 #   it still owns its version on the module proxy, so the number goes past
 #   it - reusing its name would collide, and a lower version would never be
@@ -93,6 +95,14 @@ ancestor() {
   fi
   [ "$status" -eq 0 ]
 }
+
+mainline_tip=""
+if [ "$mode" = next ] && [ -n "${MAINLINE_REF:-}" ]; then
+  if ! mainline_tip=$(git rev-parse -q --verify "${MAINLINE_REF}^{commit}"); then
+    echo "MAINLINE_REF ${MAINLINE_REF} does not resolve; refusing to release." >&2
+    exit 1
+  fi
+fi
 
 glob="${module}/v[0-9]*.[0-9]*.[0-9]*"
 reachable=$(git tag --sort=-v:refname --merged HEAD --list "$glob")
@@ -114,8 +124,7 @@ while IFS= read -r candidate; do
     echo "Ignoring ${candidate}: a v${candidate_major} tag belongs to the /v${candidate_major} module path." >&2
     continue
   fi
-  if [ "$mode" = next ] && [ -n "${MAINLINE_REF:-}" ] \
-    && ancestor HEAD "$candidate" && ancestor "$candidate" "$MAINLINE_REF"; then
+  if [ -n "$mainline_tip" ] && ancestor HEAD "$candidate" && ancestor "$candidate" "$mainline_tip"; then
     echo "${candidate} is on a later mainline commit than HEAD; this run is stale, nothing to release." >&2
     echo "skip"
     exit 0
@@ -389,6 +398,7 @@ esac
 if [ "$first_release" = true ] && [ "$major" -eq 0 ] && [ "$minor" -eq 0 ]; then
   minor=1
   patch=0
+  level="minor"
 fi
 
 # From v2 on, Go requires the major version in the module path. A tag the
